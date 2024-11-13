@@ -1,3 +1,1 @@
-new classification task/saved_data/label_mapping.pkl
-new classification task/saved_data/preprocessed_data.pkl
-new classification task/saved_data/scaler.pkl
+new classification task/model/saved_data/
