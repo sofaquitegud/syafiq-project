@@ -3,10 +3,12 @@ import pandas as pd
 import xgboost as xgb
 import re
 import pickle
+from tkinter import Tk, filedialog
 
 # Load pre-trained model and scaler
-model_path = "C:/Users/syafi/Desktop/syafiq-project/new classification task/model/saved_data/best_xgb_model_sample_size_30000.pkl"
-scaler_path = "C:/Users/syafi/Desktop/syafiq-project/new classification task/model/saved_data/scaler.pkl"
+model_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/best_xgb_model_sample_size_30000.pkl"
+scaler_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/scaler.pkl"
+label_mapping_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/label_mapping.pkl"
 
 with open(model_path, "rb") as model_file:
     xgb_model = pickle.load(model_file)
@@ -14,103 +16,112 @@ with open(model_path, "rb") as model_file:
 with open(scaler_path, "rb") as scaler_file:
     scaler = pickle.load(scaler_file)
 
-# Map predictions back to disease labels
-disease_labels = [
-    "Healthy",
-    "Hypertension",
-    "Diabetes",
-    "Atherosclerosis",
-    "Cardiovascular Disease (CVD)",
-    "Respiratory Disease (COPD or Asthma)",
-    "Chronic Fatigue Syndrome (CFS)",
-    "Arrhythmias",
-    "Stress-related Disorders",
-    "Autonomic Dysfunction",
-    "Anaemia",
-]
+with open(label_mapping_path, "rb") as label_file:
+    label_mapping = pickle.load(label_file)
+
+# Map numeric labels back to disease labels
+disease_labels = {v: k for k, v in label_mapping.items()}
 
 
-# Function to extract text from a pdf
+# Function to extract text from PDF
 def extract_text_from_pdf(file_path):
     try:
         with fitz.open(file_path) as pdf_file:
             return "\n".join(page.get_text("text") for page in pdf_file)
     except Exception as e:
-        print(f"Error extracting text from pdf: {e}")
+        print(f"Error extracting text from PDF: {e}")
         return ""
 
 
-# Function to extract numeric features
+# Function to extract numeric features from text
 def extract_numeric_feature(text, keyword):
-    match = re.search(rf"{keyword}:?\s*(\d+\.?\d*)", text)
+    match = re.search(rf"{keyword}[:\s]*([0-9.]+)", text)
     return float(match.group(1)) if match else None
 
 
-# Function to preprocess text for model (XGBoost) input
+# Preprocess PDF text into a feature vector
 def preprocess_pdf_text(text):
-    # Define the features to extract
+    # Define feature keywords based on the content of the PDF
     feature_keywords = {
-        "Gender (0-M;1-F)": "Gender",
-        "Blood Pressure (systolic)": "Blood Pressure (systolic)",
-        "Blood Pressure (diastolic)": "Blood Pressure (diastolic)",
         "Heart Rate (bpm)": "Heart Rate",
         "Breathing Rate (brpm)": "Breathing Rate",
         "Oxygen Saturation (%)": "Oxygen Saturation",
-        "Hemoglobin A1c (%)": "Hemoglobin A1c",
-        "HRV SDNN (ms)": "HRV SDNN",
-        "RMSSD (ms)": "RMSSD",
-        "Recovery Ability": "Recovery Ability",
-        "Mean RRi (ms)": "Mean RRi",
+        "Blood Pressure (systolic)": "Blood Pressure Systolic",
+        "Blood Pressure (diastolic)": "Blood Pressure Diastolic",
         "Stress Index": "Stress Index",
-        "SNS Index": "SNS Index",
+        "Recovery Ability": "Recovery Ability (PNS Zone)",
         "PNS Index": "PNS Index",
+        "Mean RRi (ms)": "Mean RRi",
+        "RMSSD (ms)": "RMSSD",
+        "SD1 (ms)": "SD1",
+        "SD2 (ms)": "SD2",
+        "HRV SDNN (ms)": "HRV SDNN",
         "Hemoglobin (g/dl)": "Hemoglobin",
+        "Hemoglobin A1c (%)": "Hemoglobin A1c",
     }
 
-    # Extract features
-    data_dict = {
-        feature: extract_numeric_feature(text, keyword)
-        for feature, keyword in feature_keywords.items()
-    }
+    # Extract features from the text using regex
+    data_dict = {}
+    for feature, keyword in feature_keywords.items():
+        extracted_value = extract_numeric_feature(text, keyword)
+        data_dict[feature] = extracted_value if extracted_value is not None else 0
 
-    # Handle missing features with default values
-    df = pd.DataFrame([data_dict]).fillna(0)
+    # Reindex to align with scaler features
+    df = pd.DataFrame([data_dict]).reindex(
+        columns=scaler.feature_names_in_, fill_value=0
+    )
 
-    # Align with scaler's expected feature order
-    df = df[scaler.feature_names_in_]
-
-    # Scale data
-    scaled_data = scaler.tranform(df)
+    # Ensure the data is scaled
+    scaled_data = scaler.transform(df)
 
     return scaled_data
 
 
-# Function to predict disease using the XGBoost model
+# Predict disease using the XGBoost model
 def predict_disease(file_path):
-    # Extract text
     text = extract_text_from_pdf(file_path)
     if not text:
         return "Error: Unable to extract text from PDF."
 
-    # Preprocess text
     processed_data = preprocess_pdf_text(text)
-
-    # Convert processed data into DMatrix format
     dmatrix_data = xgb.DMatrix(processed_data)
-
-    # Make prediction
     prediction = xgb_model.predict(dmatrix_data)
-    predicted_class = prediction.argmax(axis=-1)
-
-    # Return the mapped disease label
+    predicted_class = int(prediction[0].argmax())  # Extract scalar value
     return disease_labels[predicted_class]
 
 
-# Main script to run the prediction
-if __name__ == "__main__":
-    # Prompt user to input the pdf file path
-    pdf_file_path = input("Enter the path to the pdf file: ").strip()
+# Debugging function to print the extracted data and model prediction
+def debug_predictions(file_path):
+    # Extract text
+    text = extract_text_from_pdf(file_path)
+    print("Extracted Text: ", text)
 
-    # Predict disease
-    predicted_disease = predict_disease(pdf_file_path)
-    print(f"Predicted Disease: {predicted_disease}")
+    # Preprocess text
+    processed_data = preprocess_pdf_text(text)
+    print("Processed Data: ", processed_data)
+
+    # Convert processed data into DMatrix format and make prediction
+    dmatrix_data = xgb.DMatrix(processed_data)
+    prediction = xgb_model.predict(dmatrix_data)
+    print("Prediction Array: ", prediction)
+
+    predicted_class = int(prediction[0].argmax())
+    print(f"Predicted Class Index: {predicted_class}")
+    print(f"Predicted Disease: {disease_labels[predicted_class]}")
+
+
+# Main script
+if __name__ == "__main__":
+    print("Please select a PDF file for prediction.")
+
+    # Initialize Tkinter file upload dialog
+    root = Tk()
+    root.withdraw()  # Hide Tkinter GUI
+    file_path = filedialog.askopenfilename(filetypes=[("PDF Files", "*.pdf")])
+    root.destroy()
+
+    if file_path:
+        # Debugging to check extraction and prediction
+        debug_predictions(file_path)  # Add this line for debugging
+    else:
+        print("No file selected. Exiting.")
