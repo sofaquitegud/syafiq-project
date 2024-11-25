@@ -3,7 +3,9 @@ import pandas as pd
 import xgboost as xgb
 import re
 import pickle
-from tkinter import Tk, filedialog
+import streamlit as st
+from PIL import Image
+import os
 
 # Load pre-trained model and scaler
 model_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/best_xgb_model_sample_size_30000.pkl"
@@ -90,38 +92,64 @@ def predict_disease(file_path):
     return disease_labels[predicted_class]
 
 
-# Debugging function to print the extracted data and model prediction
-def debug_predictions(file_path):
-    # Extract text
-    text = extract_text_from_pdf(file_path)
-    print("Extracted Text: ", text)
-
-    # Preprocess text
-    processed_data = preprocess_pdf_text(text)
-    print("Processed Data: ", processed_data)
-
-    # Convert processed data into DMatrix format and make prediction
-    dmatrix_data = xgb.DMatrix(processed_data)
-    prediction = xgb_model.predict(dmatrix_data)
-    print("Prediction Array: ", prediction)
-
-    predicted_class = int(prediction[0].argmax())
-    print(f"Predicted Class Index: {predicted_class}")
-    print(f"Predicted Disease: {disease_labels[predicted_class]}")
+# Function to render PDF as images
+def render_pdf(file_path):
+    images = []
+    pdf_document = fitz.open(file_path)
+    for page_num in range(len(pdf_document)):
+        page = pdf_document[page_num]
+        pix = page.get_pixmap()
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        images.append(img)
+    return images
 
 
-# Main script
-if __name__ == "__main__":
-    print("Please select a PDF file for prediction.")
+# Streamlit app
+st.title("Disease Prediction from PDF")
 
-    # Initialize Tkinter file upload dialog
-    root = Tk()
-    root.withdraw()  # Hide Tkinter GUI
-    file_path = filedialog.askopenfilename(filetypes=[("PDF Files", "*.pdf")])
-    root.destroy()
+# Maintain state for uploaded files and predictions
+if "uploaded_files" not in st.session_state:
+    st.session_state.uploaded_files = []
+if "predictions" not in st.session_state:
+    st.session_state.predictions = {}
 
-    if file_path:
-        # Debugging to check extraction and prediction
-        debug_predictions(file_path)  # Add this line for debugging
-    else:
-        print("No file selected. Exiting.")
+# Upload PDF file
+uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
+
+if uploaded_file is not None:
+    # Save the uploaded file to a temporary location
+    temp_file_path = f"temp_{uploaded_file.name}"
+    with open(temp_file_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+
+    # Avoid duplicate processing
+    if uploaded_file.name not in st.session_state.uploaded_files:
+        # Process the PDF and store results
+        try:
+            predicted_disease = predict_disease(temp_file_path)
+            st.session_state.uploaded_files.append(uploaded_file.name)
+            st.session_state.predictions[uploaded_file.name] = predicted_disease
+        except Exception as e:
+            st.error(f"An error occurred during prediction: {e}")
+
+    # Display the PDF
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.write("### Uploaded PDF")
+        pdf_images = render_pdf(temp_file_path)
+        for img in pdf_images:
+            st.image(img, use_container_width=True)
+
+    with col2:
+        st.write("### Predicted Disease")
+        st.success(st.session_state.predictions[uploaded_file.name])
+
+    # Optionally clean up temporary files after display
+    if os.path.exists(temp_file_path):
+        os.remove(temp_file_path)
+
+# Show history of uploaded files and predictions
+if st.session_state.uploaded_files:
+    st.write("### Prediction History")
+    for file_name in st.session_state.uploaded_files:
+        st.write(f"- **{file_name}**: {st.session_state.predictions[file_name]}")
