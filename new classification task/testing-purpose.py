@@ -1,108 +1,116 @@
-import pymupdf
+import fitz
 import pandas as pd
-from keras.models import load_model
+import xgboost as xgb
 import re
 import pickle
-from sklearn.preprocessing import StandardScaler
 
-# Load the pre-trained model and scalar
-model = load_model(
-    r"C:\Users\syafi\Desktop\TM\Heart_Rate_Classification\new classification task\best results\cnn_model.h5"
-)
-with open(
-    r"C:\Users\syafi\Desktop\TM\Heart_Rate_Classification\new classification task\scaler.pkl",
-    "rb",
-) as f:
-    scaler = pickle.load(f)
+# Load pre-trained model and scaler
+model_path = "C:/Users/syafi/Desktop/syafiq-project/new classification task/model/saved_data/best_xgb_model_sample_size_30000.pkl"
+scaler_path = "C:/Users/syafi/Desktop/syafiq-project/new classification task/model/saved_data/scaler.pkl"
 
-    # Function to extract text from PDF file
-    def extract_text_from_pdf(file_path):
-        with pymupdf.open(file_path) as pdf_file:
-            text = ""
-            for page_num in range(pdf_file.page_count):
-                page = pdf_file[page_num]
-                text += page.get_text("text")  # Extract text from each page
-        return text
+with open(model_path, "rb") as model_file:
+    xgb_model = pickle.load(model_file)
 
-    # Function to preprocess text and format it for CNN input
-    def preprocess_pdf_text(text):
-        # Extract numeric feature from text
-        data_dict = {
-            "Gender (0-M;1-F)": extract_numeric_feature(text, "Gender"),
-            "Blood Pressure (systolic)": extract_numeric_feature(
-                text, "Blood Pressure (systolic)"
-            ),
-            "Blood Pressure (diastolic)": extract_numeric_feature(
-                text, "Blood Pressure (diastolic)"
-            ),
-            "Heart Rate (bpm)": extract_numeric_feature(text, "Heart Rate"),
-            "Breathing Rate (brpm)": extract_numeric_feature(text, "Breathing Rate"),
-            "Oxygen Saturation (%)": extract_numeric_feature(text, "Oxygen Saturation"),
-            "Hemoglobin A1c (%)": extract_numeric_feature(text, "Hemoglobin A1c"),
-            "HRV SDNN (ms)": extract_numeric_feature(text, "HRV SDNN"),
-            "RMSSD (ms)": extract_numeric_feature(text, "RMSSD"),
-            "Recovery Ability": extract_numeric_feature(text, "Recovery Ability"),
-            "Mean RRi (ms)": extract_numeric_feature(text, "Mean RRi"),
-            "Stress Index": extract_numeric_feature(text, "Stress Index"),
-            "SNS Index": extract_numeric_feature(text, "SNS Index"),
-            "PNS Index": extract_numeric_feature(text, "PNS Index"),
-            "Hemoglobin (g/dl)": extract_numeric_feature(text, "Hemoglobin"),
-            "SD1 (ms)": 0,  # Add any missing features with default values
-            "SD2 (ms)": 0,
-        }
+with open(scaler_path, "rb") as scaler_file:
+    scaler = pickle.load(scaler_file)
 
-        # Convert to DataFrame and handle missing data (set to 0)
-        df = pd.DataFrame([data_dict])
-        df.fillna(0, inplace=True)
-
-        # Reorder DataFrame to match scaler's expected feature order
-        df = df[scaler.feature_names_in_]
-
-        # Scale data using the same scaler used during training
-        scaled_data = scaler.transform(df)
-
-        # Reshape for the CNN model input (batch, time_step, features)
-        scaled_data = scaled_data.reshape(1, scaled_data.shape[1], 1)
-
-        return scaled_data
+# Map predictions back to disease labels
+disease_labels = [
+    "Healthy",
+    "Hypertension",
+    "Diabetes",
+    "Atherosclerosis",
+    "Cardiovascular Disease (CVD)",
+    "Respiratory Disease (COPD or Asthma)",
+    "Chronic Fatigue Syndrome (CFS)",
+    "Arrhythmias",
+    "Stress-related Disorders",
+    "Autonomic Dysfunction",
+    "Anaemia",
+]
 
 
-# Helper function to extract numerical values for features
+# Function to extract text from a pdf
+def extract_text_from_pdf(file_path):
+    try:
+        with fitz.open(file_path) as pdf_file:
+            return "\n".join(page.get_text("text") for page in pdf_file)
+    except Exception as e:
+        print(f"Error extracting text from pdf: {e}")
+        return ""
+
+
+# Function to extract numeric features
 def extract_numeric_feature(text, keyword):
-    match = re.search(f"{keyword}:?\\s*(\\d+\\.?\\d*)", text)
+    match = re.search(rf"{keyword}:?\s*(\d+\.?\d*)", text)
     return float(match.group(1)) if match else None
 
 
-# Function to predict disease from processed data
-def predict_disease_from_pdf(pdf_path, model):
-    # Extract text from PDF
-    text = extract_text_from_pdf(pdf_path)
+# Function to preprocess text for model (XGBoost) input
+def preprocess_pdf_text(text):
+    # Define the features to extract
+    feature_keywords = {
+        "Gender (0-M;1-F)": "Gender",
+        "Blood Pressure (systolic)": "Blood Pressure (systolic)",
+        "Blood Pressure (diastolic)": "Blood Pressure (diastolic)",
+        "Heart Rate (bpm)": "Heart Rate",
+        "Breathing Rate (brpm)": "Breathing Rate",
+        "Oxygen Saturation (%)": "Oxygen Saturation",
+        "Hemoglobin A1c (%)": "Hemoglobin A1c",
+        "HRV SDNN (ms)": "HRV SDNN",
+        "RMSSD (ms)": "RMSSD",
+        "Recovery Ability": "Recovery Ability",
+        "Mean RRi (ms)": "Mean RRi",
+        "Stress Index": "Stress Index",
+        "SNS Index": "SNS Index",
+        "PNS Index": "PNS Index",
+        "Hemoglobin (g/dl)": "Hemoglobin",
+    }
 
-    # Preprocess text to format it for CNN input
+    # Extract features
+    data_dict = {
+        feature: extract_numeric_feature(text, keyword)
+        for feature, keyword in feature_keywords.items()
+    }
+
+    # Handle missing features with default values
+    df = pd.DataFrame([data_dict]).fillna(0)
+
+    # Align with scaler's expected feature order
+    df = df[scaler.feature_names_in_]
+
+    # Scale data
+    scaled_data = scaler.tranform(df)
+
+    return scaled_data
+
+
+# Function to predict disease using the XGBoost model
+def predict_disease(file_path):
+    # Extract text
+    text = extract_text_from_pdf(file_path)
+    if not text:
+        return "Error: Unable to extract text from PDF."
+
+    # Preprocess text
     processed_data = preprocess_pdf_text(text)
 
+    # Convert processed data into DMatrix format
+    dmatrix_data = xgb.DMatrix(processed_data)
+
     # Make prediction
-    prediction = model.predict(processed_data)
+    prediction = xgb_model.predict(dmatrix_data)
     predicted_class = prediction.argmax(axis=-1)
 
-    # Map predictions back to disease labels
-    disease_labels = [
-        "Healthy",
-        "Hypertension",
-        "Diabetes",
-        "Atherosclerosis",
-        "Cardiovascular Disease (CVD)",
-        "Respiratory Disease (COPD or Asthma)",
-        "Chronic Fatigue Syndrome (CFS)",
-        "Arrhythmias",
-        "Stress-related Disorders",
-        "Autonomic Dysfunction",
-        "Aneamia",
-    ]
-    return disease_labels[predicted_class[0]]
+    # Return the mapped disease label
+    return disease_labels[predicted_class]
 
 
-# Load model and predict disease from PDF input
-pdf_file_path = r"C:\Users\syafi\Desktop\work related\relate with health issue\Binah.ai Report - Anemia 1.pdf"
-predicted_disease = predict_disease_from_pdf(pdf_file_path, model)
-print(f"Predicted Disease: {predicted_disease}")
+# Main script to run the prediction
+if __name__ == "__main__":
+    # Prompt user to input the pdf file path
+    pdf_file_path = input("Enter the path to the pdf file: ").strip()
+
+    # Predict disease
+    predicted_disease = predict_disease(pdf_file_path)
+    print(f"Predicted Disease: {predicted_disease}")
