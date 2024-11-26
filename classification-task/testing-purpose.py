@@ -8,7 +8,7 @@ from PIL import Image
 import os
 
 # Load pre-trained model and scaler
-model_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/best_xgb_model_sample_size_30000.pkl"
+model_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/best_xgb_model_sample_size_30000.pkl"
 scaler_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/scaler.pkl"
 label_mapping_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/label_mapping.pkl"
 
