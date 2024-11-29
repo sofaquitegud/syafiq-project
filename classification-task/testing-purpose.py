@@ -8,7 +8,7 @@ from PIL import Image
 import os
 
 # Load pre-trained model and scaler
-model_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/best_xgb_model_sample_size_30000.pkl"
+model_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/best_xgb_model_sample_size_40000.pkl"
 scaler_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/scaler.pkl"
 label_mapping_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/label_mapping.pkl"
 
@@ -83,13 +83,14 @@ def preprocess_pdf_text(text):
 def predict_disease(file_path):
     text = extract_text_from_pdf(file_path)
     if not text:
-        return "Error: Unable to extract text from PDF."
+        return None, None
 
     processed_data = preprocess_pdf_text(text)
     dmatrix_data = xgb.DMatrix(processed_data)
     prediction = xgb_model.predict(dmatrix_data)
     predicted_class = int(prediction[0].argmax())  # Extract scalar value
-    return disease_labels[predicted_class]
+    confidence = prediction[0][predicted_class]  # Get confidence score
+    return disease_labels[predicted_class], confidence
 
 
 # Function to render PDF as images
@@ -126,9 +127,15 @@ if uploaded_file is not None:
     if uploaded_file.name not in st.session_state.uploaded_files:
         # Process the PDF and store results
         try:
-            predicted_disease = predict_disease(temp_file_path)
-            st.session_state.uploaded_files.append(uploaded_file.name)
-            st.session_state.predictions[uploaded_file.name] = predicted_disease
+            predicted_disease, confidence = predict_disease(temp_file_path)
+            if predicted_disease is not None:
+                st.session_state.uploaded_files.append(uploaded_file.name)
+                st.session_state.predictions[uploaded_file.name] = (
+                    predicted_disease,
+                    confidence,
+                )
+            else:
+                st.error("Prediction failed. Please check the input file.")
         except Exception as e:
             st.error(f"An error occurred during prediction: {e}")
 
@@ -142,7 +149,9 @@ if uploaded_file is not None:
 
     with col2:
         st.write("### Predicted Disease")
-        st.success(st.session_state.predictions[uploaded_file.name])
+        if uploaded_file.name in st.session_state.predictions:
+            disease, confidence = st.session_state.predictions[uploaded_file.name]
+            st.success(f"{disease} (Confidence: {confidence:.2f})")
 
     # Optionally clean up temporary files after display
     if os.path.exists(temp_file_path):
@@ -152,4 +161,5 @@ if uploaded_file is not None:
 if st.session_state.uploaded_files:
     st.write("### Prediction History")
     for file_name in st.session_state.uploaded_files:
-        st.write(f"- **{file_name}**: {st.session_state.predictions[file_name]}")
+        disease, confidence = st.session_state.predictions[file_name]
+        st.write(f"- **{file_name}**: {disease} (Confidence: {confidence:.2f})")
