@@ -8,9 +8,9 @@ from PIL import Image
 import os
 
 # Load pre-trained model and scaler
-model_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/best_xgb_model_sample_size_40000.pkl"
-scaler_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/scaler.pkl"
-label_mapping_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/label_mapping.pkl"
+model_path = "model/saved_data/best_xgb_model_sample_size_40000.pkl"
+scaler_path = "model/saved_data/scaler.pkl"
+label_mapping_path = "model/saved_data/label_mapping.pkl"
 
 with open(model_path, "rb") as model_file:
     xgb_model = pickle.load(model_file)
@@ -37,8 +37,17 @@ def extract_text_from_pdf(file_path):
 
 # Function to extract numeric features from text
 def extract_numeric_feature(text, keyword):
-    match = re.search(rf"{keyword}[:\s]*([0-9.]+)", text)
-    return float(match.group(1)) if match else None
+    if keyword == "Blood Pressure":
+        # Regex to capture blood pressure in "systolic/diastolic" format
+        match = re.search(r"Blood Pressure[:\s]*([\d]+)/([\d]+)", text)
+        if match:
+            systolic = float(match.group(1))
+            diastolic = float(match.group(2))
+            return systolic, diastolic
+    else:
+        match = re.search(rf"{keyword}[:\s]*([0-9.]+)", text)
+        return float(match.group(1)) if match else None
+    return None
 
 
 # Preprocess PDF text into a feature vector
@@ -66,7 +75,13 @@ def preprocess_pdf_text(text):
     data_dict = {}
     for feature, keyword in feature_keywords.items():
         extracted_value = extract_numeric_feature(text, keyword)
-        data_dict[feature] = extracted_value if extracted_value is not None else 0
+        if keyword == "Blood Pressure":
+            if extracted_value:
+                systolic, diastolic = extracted_value
+                data_dict["Blood Pressure (systolic)"] = systolic
+                data_dict["Blood Pressure (diastolic)"] = diastolic
+        else:
+            data_dict[feature] = extracted_value if not None else 0
 
     # Reindex to align with scaler features
     df = pd.DataFrame([data_dict]).reindex(
