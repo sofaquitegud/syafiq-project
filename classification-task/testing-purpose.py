@@ -8,7 +8,7 @@ from PIL import Image
 import os
 
 # Load pre-trained model and scaler
-model_path = "model/saved_data/best_xgb_model_sample_size_40000.pkl"
+model_path = "model/saved_data/latest_xgb_model.pkl"
 scaler_path = "model/saved_data/scaler.pkl"
 label_mapping_path = "model/saved_data/label_mapping.pkl"
 
@@ -38,14 +38,24 @@ def extract_text_from_pdf(file_path):
 # Function to extract numeric features from text
 def extract_numeric_feature(text, keyword):
     if keyword == "Blood Pressure":
-        # Regex to capture blood pressure in "systolic/diastolic" format
-        match = re.search(r"Blood Pressure[:\s]*([\d]+)/([\d]+)", text)
+        # Look for combined systolic and diastolic blood pressure values
+        # Adjust regex to match more variations, e.g., spaces or slashes in between systolic and diastolic values
+        match = re.search(r"Blood Pressure[:\s]*([\d]+)[\s/]*[\-]*[\s]*([\d]+)", text)
         if match:
             systolic = float(match.group(1))
             diastolic = float(match.group(2))
             return systolic, diastolic
+    elif keyword == "Recovery Ability":
+        # Look for the text "Normal", "Medium", "Low" in a case-insensitive manner
+        if "normal" in text.lower():
+            return 0  # Normal
+        elif "medium" in text.lower():
+            return 1  # Medium
+        elif "low" in text.lower():
+            return 2  # Low
     else:
-        match = re.search(rf"{keyword}[:\s]*([0-9.]+)", text)
+        # For other features, use the regular numeric extraction
+        match = re.search(rf"{keyword}[:\s]*(-?[0-9.]+)", text)
         return float(match.group(1)) if match else None
     return None
 
@@ -57,10 +67,10 @@ def preprocess_pdf_text(text):
         "Heart Rate (bpm)": "Heart Rate",
         "Breathing Rate (brpm)": "Breathing Rate",
         "Oxygen Saturation (%)": "Oxygen Saturation",
-        "Blood Pressure (systolic)": "Blood Pressure Systolic",
-        "Blood Pressure (diastolic)": "Blood Pressure Diastolic",
+        "Blood Pressure (systolic)": "Blood Pressure",
+        "Blood Pressure (diastolic)": "Blood Pressure",
         "Stress Index": "Stress Index",
-        "Recovery Ability": "Recovery Ability (PNS Zone)",
+        "Recovery Ability": "Recovery Ability",
         "PNS Index": "PNS Index",
         "Mean RRi (ms)": "Mean RRi",
         "RMSSD (ms)": "RMSSD",
@@ -81,7 +91,7 @@ def preprocess_pdf_text(text):
                 data_dict["Blood Pressure (systolic)"] = systolic
                 data_dict["Blood Pressure (diastolic)"] = diastolic
         else:
-            data_dict[feature] = extracted_value if not None else 0
+            data_dict[feature] = extracted_value if extracted_value is not None else 0
 
     # Reindex to align with scaler features
     df = pd.DataFrame([data_dict]).reindex(
@@ -91,21 +101,21 @@ def preprocess_pdf_text(text):
     # Ensure the data is scaled
     scaled_data = scaler.transform(df)
 
-    return scaled_data
+    return scaled_data, data_dict
 
 
 # Predict disease using the XGBoost model
 def predict_disease(file_path):
     text = extract_text_from_pdf(file_path)
     if not text:
-        return None, None
+        return None, None, None
 
-    processed_data = preprocess_pdf_text(text)
+    processed_data, extracted_features = preprocess_pdf_text(text)
     dmatrix_data = xgb.DMatrix(processed_data)
     prediction = xgb_model.predict(dmatrix_data)
     predicted_class = int(prediction[0].argmax())  # Extract scalar value
     confidence = prediction[0][predicted_class]  # Get confidence score
-    return disease_labels[predicted_class], confidence
+    return disease_labels[predicted_class], confidence, extracted_features
 
 
 # Function to render PDF as images
@@ -142,20 +152,28 @@ if uploaded_file is not None:
     if uploaded_file.name not in st.session_state.uploaded_files:
         # Process the PDF and store results
         try:
-            predicted_disease, confidence = predict_disease(temp_file_path)
+            predicted_disease, confidence, extracted_features = predict_disease(
+                temp_file_path
+            )
             if predicted_disease is not None:
+                # Extract features for display
+                text = extract_text_from_pdf(temp_file_path)
+                extracted_features = preprocess_pdf_text(text)
+
+                # Store results
                 st.session_state.uploaded_files.append(uploaded_file.name)
                 st.session_state.predictions[uploaded_file.name] = (
                     predicted_disease,
                     confidence,
+                    extracted_features,
                 )
             else:
                 st.error("Prediction failed. Please check the input file.")
         except Exception as e:
             st.error(f"An error occurred during prediction: {e}")
 
-    # Display the PDF
-    col1, col2 = st.columns([2, 1])
+    # Display the PDF and extracted features in a table
+    col1, col2 = st.columns([2, 3])
     with col1:
         st.write("### Uploaded PDF")
         pdf_images = render_pdf(temp_file_path)
@@ -165,8 +183,17 @@ if uploaded_file is not None:
     with col2:
         st.write("### Predicted Disease")
         if uploaded_file.name in st.session_state.predictions:
-            disease, confidence = st.session_state.predictions[uploaded_file.name]
+            disease, confidence, extracted_features = st.session_state.predictions[
+                uploaded_file.name
+            ]
             st.success(f"{disease} (Confidence: {confidence:.2f})")
+
+            # Display extracted features in a non-scrollable table
+            st.write("### Extracted Features")
+            feature_table = pd.DataFrame(
+                extracted_features[1].items(), columns=["Feature", "Value"]
+            )
+            st.dataframe(feature_table, use_container_width=True)
 
     # Optionally clean up temporary files after display
     if os.path.exists(temp_file_path):
@@ -176,5 +203,5 @@ if uploaded_file is not None:
 if st.session_state.uploaded_files:
     st.write("### Prediction History")
     for file_name in st.session_state.uploaded_files:
-        disease, confidence = st.session_state.predictions[file_name]
+        disease, confidence, _ = st.session_state.predictions[file_name]
         st.write(f"- **{file_name}**: {disease} (Confidence: {confidence:.2f})")
