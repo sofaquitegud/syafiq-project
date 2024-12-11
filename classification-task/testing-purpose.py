@@ -1,12 +1,14 @@
 import fitz
+import numpy as np
 import pandas as pd
 import xgboost as xgb
 import re
 import pickle
 import streamlit as st
-from PIL import Image
 import tempfile
 import logging
+from PIL import Image
+from joblib import load
 
 # Configure logging
 logging.basicConfig(
@@ -28,12 +30,49 @@ disease_labels = {
     10: "Autonomic Dysfunction",
 }
 
-# Load pre-trained model
-model_path = "./model/saved_data/xgb_model.pkl"
-with open(model_path, "rb") as model_file:
-    xgb_model = pickle.load(model_file)
+model_features = [
+    "Heart Rate (bpm)",
+    "Breathing Rate (brpm)",
+    "Oxygen Saturation (%)",
+    "Blood Pressure (systolic)",
+    "Blood Pressure (diastolic)",
+    "Stress Index",
+    "Recovery Ability",
+    "PNS Index",
+    "Mean RRi (ms)",
+    "RMSSD (ms)",
+    "SD1 (ms)",
+    "SD2 (ms)",
+    "HRV SDNN (ms)",
+    "Hemoglobin (g/dl)",
+    "Hemoglobin A1c (%)",
+    "SNS Index",
+    "Gender (0-M;1-F)",
+]
 
-model_features = xgb_model.feature_names
+# Load pre-trained model
+model_path = "xgb_model.joblib"
+xgb_model = load(model_path)
+
+model_features = [
+    "Heart Rate (bpm)",
+    "Breathing Rate (brpm)",
+    "Oxygen Saturation (%)",
+    "Blood Pressure (systolic)",
+    "Blood Pressure (diastolic)",
+    "Stress Index",
+    "Recovery Ability",
+    "PNS Index",
+    "Mean RRi (ms)",
+    "RMSSD (ms)",
+    "SD1 (ms)",
+    "SD2 (ms)",
+    "HRV SDNN (ms)",
+    "Hemoglobin (g/dl)",
+    "Hemoglobin A1c (%)",
+    "SNS Index",
+    "Gender (0-M;1-F)",
+]
 
 # Feature extraction rules
 feature_extraction_rules = {
@@ -80,7 +119,7 @@ def extract_features_from_text(text, rules):
             )
         else:
             value = float(match.group(1)) if match else None
-        features[feature] = value if value is not None else 0
+        features[feature] = value if value is not None else np.nan
     return features
 
 
@@ -152,7 +191,7 @@ if uploaded_file is not None:
     # Avoid duplicate processing
     if uploaded_file.name not in st.session_state.uploaded_files:
         try:
-            with st.spinner("Processing..."):
+            with st.spinner("Extracting features and predicting..."):
                 predicted_disease, confidence, extracted_features = predict_disease(
                     temp_file_path
                 )
