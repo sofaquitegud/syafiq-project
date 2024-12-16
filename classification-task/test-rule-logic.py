@@ -6,7 +6,10 @@ import shap
 import matplotlib.pyplot as plt
 
 # Load the trained model
-with open("xgboost_model.pkl", "rb") as f:
+with open(
+    "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/xgboost_model.pkl",
+    "rb",
+) as f:
     xgb_model = pickle.load(f)
 
 # Load class labels
@@ -246,9 +249,8 @@ test_cases = pd.DataFrame(
     ]
 )
 
-feature_names = (
-    xgb_model.get_booster().feature_names
-)  # Get feature names from the model
+# Get feature names from the model
+feature_names = xgb_model.get_booster().feature_names
 
 # Ensure all required features are in test_cases
 for feature in feature_names:
