@@ -11,12 +11,11 @@ from joblib import load
 from pytesseract import image_to_string
 from pdf2image import convert_from_path
 
-# Configure logging
 logging.basicConfig(
     filename="predictions.log", level=logging.INFO, format="%(asctime)s - %(message)s"
 )
 
-# Define disease labels mapping
+# Disease labels mapping
 disease_labels = {
     0: "Anaemia",
     1: "Arrhythmia",
@@ -31,7 +30,6 @@ disease_labels = {
     10: "Stress-related Disorders",
 }
 
-# Adjusted model features list
 model_features = [
     "Heart Rate (bpm)",
     "Breathing Rate (brpm)",
@@ -135,6 +133,7 @@ def preprocess_pdf_text(text):
                 "HRV SDNN (ms)": 50,
                 "Hemoglobin (g/dl)": 14.0,
             }.get(key, np.nan)
+
     return pd.DataFrame([features]).reindex(columns=model_features), features
 
 
@@ -150,7 +149,6 @@ def render_pdf(file_path):
     return images
 
 
-# Streamlit UI
 st.title("Disease Prediction from PDF")
 uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
 
@@ -163,8 +161,6 @@ if uploaded_file:
     text = extract_text_from_pdf(temp_path)
     pdf_images = render_pdf(temp_path)
     feature_df, extracted_features = preprocess_pdf_text(text)
-
-    # Layout for side-by-side display
     col1, col2 = st.columns([1, 1])
 
     with col1:
@@ -176,7 +172,7 @@ if uploaded_file:
         # Disease Prediction
         try:
             prediction = xgb_model.predict(feature_df)
-            st.success(f"Predicted Disease: {disease_labels[int(prediction[0])]}")
+            st.success(f"Prediction: {disease_labels[int(prediction[0])]}")
         except Exception as e:
             st.error(f"Prediction error: {e}")
 
