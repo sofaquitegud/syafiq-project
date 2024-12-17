@@ -4,14 +4,9 @@ import pandas as pd
 import re
 import streamlit as st
 import tempfile
-import logging
 from PIL import Image
 from pytesseract import image_to_string
 from pdf2image import convert_from_path
-
-logging.basicConfig(
-    filename="predictions.log", level=logging.INFO, format="%(asctime)s - %(message)s"
-)
 
 # Disease labels mapping
 disease_labels = {
@@ -52,35 +47,34 @@ model_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/sa
 xgb_model = pd.read_pickle(model_path)
 
 
-# Function to extract text from PDF using fitz and OCR fallback
+# Function to extract text from PDF
 def extract_text_from_pdf(file_path):
     try:
         with fitz.open(file_path) as pdf_file:
-            raw_text = ""
-            for page in pdf_file:
-                raw_text += page.get_text("text")
-            if not raw_text.strip():  # Fallback to OCR if no text
+            raw_text = "".join(page.get_text("text") for page in pdf_file)
+            if not raw_text.strip():
                 pages = convert_from_path(file_path, dpi=300)
-                raw_text = " ".join(
-                    image_to_string(page, config="--psm 6") for page in pages
-                )
-        # Debug: Log raw extracted text
-        logging.info(f"Raw Text Extracted: {raw_text}")
-        print("DEBUG: Raw Extracted Text:\n", raw_text)  # Print for debugging
+                raw_text = " ".join(image_to_string(page) for page in pages)
         return re.sub(r"\s+", " ", raw_text.strip())
-    except Exception as e:
-        logging.error(f"Error extracting text from PDF: {e}")
+    except Exception:
+        return ""
+
+
+# Function to extract text from camera image
+def extract_text_from_camera_image(image):
+    try:
+        return re.sub(r"\s+", " ", image_to_string(image, config="--psm 6"))
+    except Exception:
         return ""
 
 
 # Function to extract features based on regex patterns
 def extract_features_from_text(text, rules):
-    normalized_text = text.upper()  # Normalize text to uppercase
+    normalized_text = text.upper()
     features = {}
     for feature, pattern in rules.items():
         match = re.search(pattern, normalized_text, re.DOTALL)
         if match:
-            # Replace incorrect characters (colons and commas) with periods
             raw_value = match.group(1).replace(":", ".").replace(",", ".")
             try:
                 value = (
@@ -91,64 +85,56 @@ def extract_features_from_text(text, rules):
                     )
                 )
             except ValueError:
-                value = np.nan  # Handle invalid numeric values
+                value = np.nan
         else:
             value = np.nan
         features[feature] = value
 
-    # Log missing features
-    for key, val in features.items():
-        if pd.isna(val):
-            logging.warning(f"Feature '{key}' not found or misread in the PDF.")
-
+    default_values = {
+        "Heart Rate (bpm)": 70,
+        "Breathing Rate (brpm)": 16,
+        "Oxygen Saturation (%)": 98,
+        "Blood Pressure (systolic)": 120,
+        "Blood Pressure (diastolic)": 80,
+        "Stress Index": 50,
+        "Recovery Ability": 0,
+        "PNS Index": 0.0,
+        "SNS Index": 0.5,
+        "RMSSD (ms)": 40,
+        "SD2 (ms)": 40,
+        "Hemoglobin A1c (%)": 5.4,
+        "Mean RRi (ms)": 900,
+        "SD1 (ms)": 30,
+        "HRV SDNN (ms)": 50,
+        "Hemoglobin (g/dl)": 14.0,
+    }
+    for key in model_features:
+        if pd.isna(features.get(key)):
+            features[key] = default_values.get(key, np.nan)
     return features
 
 
 # Preprocess the extracted features
-def preprocess_pdf_text(text):
+def preprocess_text_to_features(text):
     feature_patterns = {
-        "Heart Rate (bpm)": r"(?i)HEART\s*RATE\s*[:\s]*([\d.]+)\s*BPM",
-        "Breathing Rate (brpm)": r"(?i)BREATHING\s*RATE\s*[:\s]*([\d.]+)\s*BRPM",
-        "Oxygen Saturation (%)": r"(?i)OXYGEN\s*SATURATION\s*[:\s]*([\d.]+)\s*%",
-        "Blood Pressure (systolic)": r"(?i)BLOOD\s*PRESSURE\s*[:\s]*([\d]+)\/[\d]+",
-        "Blood Pressure (diastolic)": r"(?i)BLOOD\s*PRESSURE\s*[:\s]*[\d]+\/([\d]+)",
-        "Stress Index": r"(?i)STRESS\s*INDEX\s*[:\s]*([\d.]+)",
-        "Recovery Ability": r"(?i)RECOVERY\s*ABILITY\s*\(PNS\s*ZONE\)\s*[:\s]*(NORMAL|MEDIUM|LOW)",
-        "PNS Index": r"(?i)PNS\s*INDEX\s*[:\s]*(-?[\d.]+)",
-        "SNS Index": r"(?i)SNS\s*INDEX\s*[:\s]*(-?[\d.]+)",
-        "RMSSD (ms)": r"(?i)RMSSD\s*[:\s]*([\d.]+)\s*MS",
-        "SD1 (ms)": r"(?i)SD1\s*[:\s]*([\d.]+)\s*MS",
-        "SD2 (ms)": r"(?i)SD2\s*[:\s]*([\d.]+)\s*MS",
-        "HRV SDNN (ms)": r"(?i)HRV\s*SDNN\s*[:\s]*([\d.]+)\s*MS",
-        "Hemoglobin (g/dl)": r"(?i)HEMOGLOBIN\s*[:\s]*([\d.]+)\s*G/DL",
-        "Hemoglobin A1c (%)": r"(?i)HEMOGLOBIN\s*A[1IL]C\s*[:\s]*([\d.:,]+)\s*%",
-        "Mean RRi (ms)": r"(?i)MEAN\s*RRI\s*[:\s]*([\d.]+)\s*MS",
+        "Heart Rate (bpm)": r"(?i)Heart\s*Rate\s*[:\s]*([\d.]+)\s*bpm",
+        "Breathing Rate (brpm)": r"(?i)Breathing\s*Rate\s*[:\s]*([\d.]+)\s*brpm",
+        "Oxygen Saturation (%)": r"(?i)Oxygen\s*Saturation\s*[:\s]*([\d.]+)\s*%",
+        "Blood Pressure (systolic)": r"(?i)Blood\s*Pressure\s*[:\s]*([\d]+)\/[\d]+",
+        "Blood Pressure (diastolic)": r"(?i)Blood\s*Pressure\s*[:\s]*[\d]+\/([\d]+)",
+        "Stress Index": r"(?i)Stress\s*Index\s*[:\s]*([\d.]+)",
+        "Recovery Ability": r"(?i)Recovery\s*Ability\s*\(PNS\s*ZONE\)\s*[:\s]*(Normal|Medium|Low)",
+        "PNS Index": r"(?i)PNS\s*Index\s*[:\s]*(-?[\d.]+)",
+        "SNS Index": r"(?i)SNS\s*Index\s*[:\s]*(-?[\d.]+)",
+        "RMSSD (ms)": r"(?i)RMSSD\s*[:\s]*([\d.]+)\s*ms",
+        "SD1 (ms)": r"(?i)SD1\s*[:\s]*([\d.]+)\s*ms",
+        "SD2 (ms)": r"(?i)SD2\s*[:\s]*([\d.]+)\s*ms",
+        "HRV SDNN (ms)": r"(?i)HRV\s*SDNN\s*[:\s]*([\d.]+)\s*ms",
+        "Hemoglobin (g/dl)": r"(?i)Hemoglobin\s*[:\s]*([\d.]+)\s*g/dl",
+        "Hemoglobin A1c (%)": r"(?i)Hemoglobin\s*A[1IL]C\s*[:\s]*([\d.:,]+)\s*%",
+        "Mean RRi (ms)": r"(?i)Mean\s*RRI\s*[:\s]*([\d.]+)\s*ms",
     }
-
     features = extract_features_from_text(text, feature_patterns)
-
-    # Impute missing features with default values
-    for key in model_features:
-        if pd.isna(features.get(key)):
-            features[key] = {
-                "Heart Rate (bpm)": 70,
-                "Breathing Rate (brpm)": 16,
-                "Oxygen Saturation (%)": 98,
-                "Blood Pressure (systolic)": 120,
-                "Blood Pressure (diastolic)": 80,
-                "Stress Index": 50,
-                "Recovery Ability": 0,
-                "PNS Index": 0.0,
-                "SNS Index": 0.5,
-                "RMSSD (ms)": 40,
-                "SD2 (ms)": 40,
-                "Hemoglobin A1c (%)": 5.4,
-                "Mean RRi (ms)": 900,
-                "SD1 (ms)": 30,
-                "HRV SDNN (ms)": 50,
-                "Hemoglobin (g/dl)": 14.0,
-            }.get(key, np.nan)
-
     return pd.DataFrame([features]).reindex(columns=model_features), features
 
 
@@ -164,35 +150,63 @@ def render_pdf(file_path):
     return images
 
 
-st.title("Disease Prediction from PDF")
-uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
+# Streamlit interface
+st.title("Disease Prediction from PDF or Camera Image")
+option = st.radio("Select Input Method:", ["PDF Document", "Camera Image"])
 
-if uploaded_file:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
-        temp_file.write(uploaded_file.getbuffer())
-        temp_path = temp_file.name
+if option == "PDF Document":
+    uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
+    if uploaded_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+            temp_file.write(uploaded_file.getbuffer())
+            temp_path = temp_file.name
 
-    # Extract PDF content
-    text = extract_text_from_pdf(temp_path)
-    pdf_images = render_pdf(temp_path)
-    feature_df, extracted_features = preprocess_pdf_text(text)
-    col1, col2 = st.columns([1, 1])
+        text = extract_text_from_pdf(temp_path)
+        pdf_images = render_pdf(temp_path)
+        feature_df, extracted_features = preprocess_text_to_features(text)
+        col1, col2 = st.columns([1, 1])
 
-    with col1:
-        st.subheader("PDF Preview")
-        for img in pdf_images:
+        with col1:
+            st.subheader("PDF Preview")
+            for img in pdf_images:
+                st.image(img, use_container_width=True)
+
+        with col2:
+            try:
+                prediction = xgb_model.predict(feature_df)
+                st.success(f"Prediction: {disease_labels[int(prediction[0])]}")
+            except Exception as e:
+                st.error(f"Prediction error: {e}")
+
+            st.subheader("Extracted Features")
+            features_df = pd.DataFrame(
+                list(extracted_features.items()), columns=["Feature", "Value"]
+            )
+            st.dataframe(features_df)
+
+elif option == "Camera Image":
+    uploaded_image = st.file_uploader(
+        "Upload a camera image", type=["jpg", "jpeg", "png"]
+    )
+    if uploaded_image:
+        img = Image.open(uploaded_image)
+        text = extract_text_from_camera_image(img)
+        feature_df, extracted_features = preprocess_text_to_features(text)
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            st.subheader("Image Preview")
             st.image(img, use_container_width=True)
 
-    with col2:
-        # Disease Prediction
-        try:
-            prediction = xgb_model.predict(feature_df)
-            st.success(f"Prediction: {disease_labels[int(prediction[0])]}")
-        except Exception as e:
-            st.error(f"Prediction error: {e}")
+        with col2:
+            try:
+                prediction = xgb_model.predict(feature_df)
+                st.success(f"Prediction: {disease_labels[int(prediction[0])]}")
+            except Exception as e:
+                st.error(f"Prediction error: {e}")
 
-        st.subheader("Extracted Features")
-        features_df = pd.DataFrame(
-            list(extracted_features.items()), columns=["Feature", "Value"]
-        )
-        st.dataframe(features_df)
+            st.subheader("Extracted Features")
+            features_df = pd.DataFrame(
+                list(extracted_features.items()), columns=["Feature", "Value"]
+            )
+            st.dataframe(features_df)
