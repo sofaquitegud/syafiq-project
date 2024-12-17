@@ -1,13 +1,11 @@
 import fitz
 import numpy as np
 import pandas as pd
-import xgboost as xgb
 import re
 import streamlit as st
 import tempfile
 import logging
 from PIL import Image
-from joblib import load
 from pytesseract import image_to_string
 from pdf2image import convert_from_path
 
@@ -51,7 +49,7 @@ model_features = [
 
 # Load pre-trained model
 model_path = "C:/Users/syafi/Desktop/syafiq-project/classification-task/model/saved_data/xgboost_model.pkl"
-xgb_model = load(model_path)
+xgb_model = pd.read_pickle(model_path)
 
 
 # Function to extract text from PDF using fitz and OCR fallback
@@ -62,8 +60,13 @@ def extract_text_from_pdf(file_path):
             for page in pdf_file:
                 raw_text += page.get_text("text")
             if not raw_text.strip():  # Fallback to OCR if no text
-                pages = convert_from_path(file_path)
-                raw_text = " ".join(image_to_string(page) for page in pages)
+                pages = convert_from_path(file_path, dpi=300)
+                raw_text = " ".join(
+                    image_to_string(page, config="--psm 6") for page in pages
+                )
+        # Debug: Log raw extracted text
+        logging.info(f"Raw Text Extracted: {raw_text}")
+        print("DEBUG: Raw Extracted Text:\n", raw_text)  # Print for debugging
         return re.sub(r"\s+", " ", raw_text.strip())
     except Exception as e:
         logging.error(f"Error extracting text from PDF: {e}")
@@ -72,45 +75,57 @@ def extract_text_from_pdf(file_path):
 
 # Function to extract features based on regex patterns
 def extract_features_from_text(text, rules):
+    normalized_text = text.upper()  # Normalize text to uppercase
     features = {}
     for feature, pattern in rules.items():
-        match = re.search(pattern, text, re.DOTALL)
+        match = re.search(pattern, normalized_text, re.DOTALL)
         if match:
-            value = (
-                float(match.group(1))
-                if feature != "Recovery Ability"
-                else {"Normal": 0, "Medium": 1, "Low": 2}.get(match.group(1), np.nan)
-            )
+            # Replace incorrect characters (colons and commas) with periods
+            raw_value = match.group(1).replace(":", ".").replace(",", ".")
+            try:
+                value = (
+                    float(raw_value)
+                    if feature != "Recovery Ability"
+                    else {"NORMAL": 0, "MEDIUM": 1, "LOW": 2}.get(
+                        match.group(1).upper(), np.nan
+                    )
+                )
+            except ValueError:
+                value = np.nan  # Handle invalid numeric values
         else:
             value = np.nan
         features[feature] = value
+
+    # Log missing features
+    for key, val in features.items():
+        if pd.isna(val):
+            logging.warning(f"Feature '{key}' not found or misread in the PDF.")
+
     return features
 
 
 # Preprocess the extracted features
 def preprocess_pdf_text(text):
-    # Feature extraction
-    features = extract_features_from_text(
-        text,
-        {
-            "Heart Rate (bpm)": r"(?i)Heart\s*Rate\s*[:\s]*([\d.]+)\s*bpm",
-            "Breathing Rate (brpm)": r"(?i)Breathing\s*Rate\s*[:\s]*([\d.]+)\s*brpm",
-            "Oxygen Saturation (%)": r"(?i)Oxygen\s*Saturation\s*[:\s]*([\d.]+)\s*%",
-            "Blood Pressure (systolic)": r"(?i)Blood\s*Pressure\s*[:\s]*([\d]+)/[\d]+",
-            "Blood Pressure (diastolic)": r"(?i)Blood\s*Pressure\s*[:\s]*[\d]+/([\d]+)",
-            "Stress Index": r"(?i)Stress\s*Index\s*[:\s]*([\d.]+)",
-            "Recovery Ability": r"(?i)Recovery\s*Ability\s*\(PNS\s*Zone\)\s*[:\s]*(Normal|Medium|Low)",
-            "PNS Index": r"(?i)PNS\s*Index\s*[:\s]*(-?[\d.]+)",
-            "Mean RRi (ms)": r"(?i)Mean\s*RRi\s*[:\s]*([\d.]+)\s*ms",
-            "RMSSD (ms)": r"(?i)RMSSD\s*[:\s]*([\d.]+)\s*ms",
-            "SD1 (ms)": r"(?i)SD1\s*[:\s]*([\d.]+)\s*ms",
-            "SD2 (ms)": r"(?i)SD2\s*[:\s]*([\d.]+)\s*ms",
-            "HRV SDNN (ms)": r"(?i)HRV\s*SDNN\s*[:\s]*([\d.]+)\s*ms",
-            "Hemoglobin (g/dl)": r"(?i)Hemoglobin\s*[:\s]*([\d.]+)\s*g/dl",
-            "Hemoglobin A1c (%)": r"(?i)Hemoglobin\s*A1c\s*[:\s]*([\d.]+)\s*%",
-            "SNS Index": r"(?i)SNS\s*Index\s*[:\s]*(-?[\d.]+)",
-        },
-    )
+    feature_patterns = {
+        "Heart Rate (bpm)": r"(?i)HEART\s*RATE\s*[:\s]*([\d.]+)\s*BPM",
+        "Breathing Rate (brpm)": r"(?i)BREATHING\s*RATE\s*[:\s]*([\d.]+)\s*BRPM",
+        "Oxygen Saturation (%)": r"(?i)OXYGEN\s*SATURATION\s*[:\s]*([\d.]+)\s*%",
+        "Blood Pressure (systolic)": r"(?i)BLOOD\s*PRESSURE\s*[:\s]*([\d]+)\/[\d]+",
+        "Blood Pressure (diastolic)": r"(?i)BLOOD\s*PRESSURE\s*[:\s]*[\d]+\/([\d]+)",
+        "Stress Index": r"(?i)STRESS\s*INDEX\s*[:\s]*([\d.]+)",
+        "Recovery Ability": r"(?i)RECOVERY\s*ABILITY\s*\(PNS\s*ZONE\)\s*[:\s]*(NORMAL|MEDIUM|LOW)",
+        "PNS Index": r"(?i)PNS\s*INDEX\s*[:\s]*(-?[\d.]+)",
+        "SNS Index": r"(?i)SNS\s*INDEX\s*[:\s]*(-?[\d.]+)",
+        "RMSSD (ms)": r"(?i)RMSSD\s*[:\s]*([\d.]+)\s*MS",
+        "SD1 (ms)": r"(?i)SD1\s*[:\s]*([\d.]+)\s*MS",
+        "SD2 (ms)": r"(?i)SD2\s*[:\s]*([\d.]+)\s*MS",
+        "HRV SDNN (ms)": r"(?i)HRV\s*SDNN\s*[:\s]*([\d.]+)\s*MS",
+        "Hemoglobin (g/dl)": r"(?i)HEMOGLOBIN\s*[:\s]*([\d.]+)\s*G/DL",
+        "Hemoglobin A1c (%)": r"(?i)HEMOGLOBIN\s*A[1IL]C\s*[:\s]*([\d.:,]+)\s*%",
+        "Mean RRi (ms)": r"(?i)MEAN\s*RRI\s*[:\s]*([\d.]+)\s*MS",
+    }
+
+    features = extract_features_from_text(text, feature_patterns)
 
     # Impute missing features with default values
     for key in model_features:
