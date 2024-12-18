@@ -12,6 +12,8 @@ from pdf2image import convert_from_path
 import cv2
 import logging
 
+logging.basicConfig(level=logging.DEBUG)
+
 # Disease labels mapping
 disease_labels = {
     0: "Anaemia",
@@ -50,14 +52,15 @@ model_features = [
 xgb_model = Booster()
 xgb_model.load_model("xgboost_model.json")
 
-# Function to preprocess images for OCR
 def preprocess_image(image):
-    image_cv = np.array(image.convert("L"))  # Convert to grayscale
+    image_cv = np.array(image.convert("L"))  # Convert to grayscale 
+    image_cv = cv2.resize(image_cv, None, fx=1.5, fy=1.5) # Increase resolution for better OCR
     image_cv = cv2.adaptiveThreshold(
         image_cv, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
     )
     image_cv = cv2.fastNlMeansDenoising(image_cv, h=10)
     return Image.fromarray(image_cv)
+
 
 # Function to extract text from PDF with OCR fallback
 def extract_text_from_pdf(file_path):
@@ -68,12 +71,13 @@ def extract_text_from_pdf(file_path):
                 return clean_text(raw_text), None
 
         # Fallback to OCR
-        pages = convert_from_path(file_path, dpi=600)
+        pages = convert_from_path(file_path, dpi=300)
         processed_text = []
         preprocessed_images = []
         for page in pages:
             preprocessed_image = preprocess_image(page)
-            ocr_text = image_to_string(preprocessed_image, config="--psm 6 --oem 3")
+            ocr_text = image_to_string(preprocessed_image, config="--psm 4 --oem 3")
+            logging.debug(f"OCR Text: {ocr_text}")
             processed_text.append(ocr_text)
             preprocessed_images.append(preprocessed_image)
 
@@ -85,11 +89,12 @@ def extract_text_from_pdf(file_path):
         logging.error(f"Error extracting text from PDF: {e}")
         return "", None
 
-# Clean extracted text
 def clean_text(text):
+    # Remove unwanted characters and normalize text
     text = re.sub(r"[^\x00-\x7F]+", " ", text)  # Remove non-ASCII characters
-    text = re.sub(r"[:,;]", ".", text)  # Replace colons/semicolons with periods
-    text = re.sub(r"\s+", " ", text)  # Normalize multiple spaces to a single space
+    text = re.sub(r"\s*\.\s*", ".", text)  # Remove unnecessary spaces before/after periods
+    text = re.sub(r"\s{2,}", " ", text)  # Replace multiple spaces with a single space
+    text = re.sub(r"\s*([0-9]+)\s*\.\s*([0-9]+)", r"\1.\2", text)  # Fix decimal formatting
     return text.strip().upper()
 
 # Function to extract features based on regex patterns
