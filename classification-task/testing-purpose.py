@@ -1,207 +1,249 @@
 import fitz
+import numpy as np
 import pandas as pd
-import xgboost as xgb
 import re
-import pickle
 import streamlit as st
+import tempfile
 from PIL import Image
-import os
+import xgboost as xgb
+from xgboost import Booster
+from pytesseract import image_to_string
+from pdf2image import convert_from_path
+import cv2
+import logging
 
-# Load pre-trained model and scaler
-model_path = "model/saved_data/latest_xgb_model.pkl"
-scaler_path = "model/saved_data/scaler.pkl"
-label_mapping_path = "model/saved_data/label_mapping.pkl"
+logging.basicConfig(level=logging.DEBUG)
 
-with open(model_path, "rb") as model_file:
-    xgb_model = pickle.load(model_file)
+# Disease labels mapping
+disease_labels = {
+    0: "Anaemia",
+    1: "Arrhythmia",
+    2: "Atherosclerosis",
+    3: "Autonomic Dysfunction",
+    4: "Cardiovascular Disease (CVD)",
+    5: "Chronic Fatigue Syndrome (CFS)",
+    6: "Diabetes",
+    7: "Healthy",
+    8: "Hypertension",
+    9: "Respiratory Disease (COPD or Asthma)",
+    10: "Stress-related Disorders",
+}
 
-with open(scaler_path, "rb") as scaler_file:
-    scaler = pickle.load(scaler_file)
+model_features = [
+    "Heart Rate (bpm)",
+    "Breathing Rate (brpm)",
+    "Oxygen Saturation (%)",
+    "Blood Pressure (systolic)",
+    "Blood Pressure (diastolic)",
+    "Stress Index",
+    "Recovery Ability",
+    "PNS Index",
+    "SNS Index",
+    "RMSSD (ms)",
+    "SD2 (ms)",
+    "Hemoglobin A1c (%)",
+    "Mean RRi (ms)",
+    "SD1 (ms)",
+    "HRV SDNN (ms)",
+    "Hemoglobin (g/dl)",
+]
 
-with open(label_mapping_path, "rb") as label_file:
-    label_mapping = pickle.load(label_file)
+# Load pre-trained model
+xgb_model = Booster()
+xgb_model.load_model("xgboost_model.json")
 
-# Map numeric labels back to disease labels
-disease_labels = {v: k for k, v in label_mapping.items()}
+def preprocess_image(image):
+    image_cv = np.array(image.convert("L"))  # Convert to grayscale 
+    image_cv = cv2.resize(image_cv, None, fx=1.5, fy=1.5) # Increase resolution for better OCR
+    image_cv = cv2.adaptiveThreshold(
+        image_cv, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+    )
+    image_cv = cv2.fastNlMeansDenoising(image_cv, h=10)
+    return Image.fromarray(image_cv)
 
 
-# Function to extract text from PDF
+# Function to extract text from PDF with OCR fallback
 def extract_text_from_pdf(file_path):
     try:
         with fitz.open(file_path) as pdf_file:
-            return "\n".join(page.get_text("text") for page in pdf_file)
+            raw_text = "".join(page.get_text("text") for page in pdf_file)
+            if raw_text.strip():
+                return clean_text(raw_text), None
+
+        # Fallback to OCR
+        pages = convert_from_path(file_path, dpi=300)
+        processed_text = []
+        preprocessed_images = []
+        for page in pages:
+            preprocessed_image = preprocess_image(page)
+            ocr_text = image_to_string(preprocessed_image, config="--psm 4 --oem 3")
+            logging.debug(f"OCR Text: {ocr_text}")
+            processed_text.append(ocr_text)
+            preprocessed_images.append(preprocessed_image)
+
+        # Combine OCR text and clean
+        ocr_text_combined = clean_text(" ".join(processed_text))
+
+        return ocr_text_combined, preprocessed_images
     except Exception as e:
-        print(f"Error extracting text from PDF: {e}")
-        return ""
+        logging.error(f"Error extracting text from PDF: {e}")
+        return "", None
 
+def clean_text(text):
+    # Remove unwanted characters and normalize text
+    text = re.sub(r"[^\x00-\x7F]+", " ", text)  # Remove non-ASCII characters
+    text = re.sub(r"\s*\.\s*", ".", text)  # Remove unnecessary spaces before/after periods
+    text = re.sub(r"\s{2,}", " ", text)  # Replace multiple spaces with a single space
+    text = re.sub(r"\s*([0-9]+)\s*\.\s*([0-9]+)", r"\1.\2", text)  # Fix decimal formatting
+    return text.strip().upper()
 
-# Function to extract numeric features from text
-def extract_numeric_feature(text, keyword):
-    if keyword == "Blood Pressure":
-        # Look for combined systolic and diastolic blood pressure values
-        # Adjust regex to match more variations, e.g., spaces or slashes in between systolic and diastolic values
-        match = re.search(r"Blood Pressure[:\s]*([\d]+)[\s/]*[\-]*[\s]*([\d]+)", text)
+# Function to extract features based on regex patterns
+def extract_features_from_text(text, rules):
+    features = {}
+    for feature, pattern in rules.items():
+        match = re.search(pattern, text, re.DOTALL)
         if match:
-            systolic = float(match.group(1))
-            diastolic = float(match.group(2))
-            return systolic, diastolic
-    elif keyword == "Recovery Ability":
-        # Look for the text "Normal", "Medium", "Low" in a case-insensitive manner
-        if "normal" in text.lower():
-            return 0  # Normal
-        elif "medium" in text.lower():
-            return 1  # Medium
-        elif "low" in text.lower():
-            return 2  # Low
-    else:
-        # For other features, use the regular numeric extraction
-        match = re.search(rf"{keyword}[:\s]*(-?[0-9.]+)", text)
-        return float(match.group(1)) if match else None
-    return None
-
-
-# Preprocess PDF text into a feature vector
-def preprocess_pdf_text(text):
-    # Define feature keywords based on the content of the PDF
-    feature_keywords = {
-        "Heart Rate (bpm)": "Heart Rate",
-        "Breathing Rate (brpm)": "Breathing Rate",
-        "Oxygen Saturation (%)": "Oxygen Saturation",
-        "Blood Pressure (systolic)": "Blood Pressure",
-        "Blood Pressure (diastolic)": "Blood Pressure",
-        "Stress Index": "Stress Index",
-        "Recovery Ability": "Recovery Ability",
-        "PNS Index": "PNS Index",
-        "Mean RRi (ms)": "Mean RRi",
-        "RMSSD (ms)": "RMSSD",
-        "SD1 (ms)": "SD1",
-        "SD2 (ms)": "SD2",
-        "HRV SDNN (ms)": "HRV SDNN",
-        "Hemoglobin (g/dl)": "Hemoglobin",
-        "Hemoglobin A1c (%)": "Hemoglobin A1c",
-    }
-
-    # Extract features from the text using regex
-    data_dict = {}
-    for feature, keyword in feature_keywords.items():
-        extracted_value = extract_numeric_feature(text, keyword)
-        if keyword == "Blood Pressure":
-            if extracted_value:
-                systolic, diastolic = extracted_value
-                data_dict["Blood Pressure (systolic)"] = systolic
-                data_dict["Blood Pressure (diastolic)"] = diastolic
+            raw_value = match.group(1).replace(",", ".")
+            try:
+                if feature == "Recovery Ability":
+                    value = {"NORMAL": 0, "MEDIUM": 1, "LOW": 2}.get(raw_value.upper(), np.nan)
+                else:
+                    value = float(raw_value)
+            except ValueError:
+                value = np.nan
         else:
-            data_dict[feature] = extracted_value if extracted_value is not None else 0
+            value = np.nan
+        features[feature] = value
 
-    # Reindex to align with scaler features
-    df = pd.DataFrame([data_dict]).reindex(
-        columns=scaler.feature_names_in_, fill_value=0
-    )
+    default_values = {
+        "Heart Rate (bpm)": 70,
+        "Breathing Rate (brpm)": 16, 
+        "Oxygen Saturation (%)": 98,
+        "Blood Pressure (systolic)": 120, 
+        "Blood Pressure (diastolic)": 80,
+        "Stress Index": 50, 
+        "Recovery Ability": 0, 
+        "PNS Index": 0.0, 
+        "SNS Index": 0.5,
+        "RMSSD (ms)": 40, 
+        "SD2 (ms)": 40, 
+        "Hemoglobin A1c (%)": 5.4, 
+        "Mean RRi (ms)": 900,
+        "SD1 (ms)": 30, 
+        "HRV SDNN (ms)": 50, 
+        "Hemoglobin (g/dl)": 14.0
+    }
+    for key in model_features:
+        if pd.isna(features.get(key)):
+            features[key] = default_values[key]
+    return features
 
-    # Ensure the data is scaled
-    scaled_data = scaler.transform(df)
+# Preprocess text to features
+def preprocess_text_to_features(text):
+    feature_patterns = {
+        "Heart Rate (bpm)": r"HEART\s*RATE\s*[:\s]*([\d.]+)",
+        "Breathing Rate (brpm)": r"BREATHING\s*RATE\s*[:\s]*([\d.]+)",
+        "Oxygen Saturation (%)": r"OXYGEN\s*SATURATION\s*[:\s]*([\d.]+)",
+        "Blood Pressure (systolic)": r"BLOOD\s*PRESSURE\s*[:\s]*([\d]+)\/[\d]+",
+        "Blood Pressure (diastolic)": r"BLOOD\s*PRESSURE\s*[:\s]*[\d]+\/([\d]+)",
+        "Stress Index": r"STRESS\s*INDEX\s*[:\s]*([\d.]+)",
+        "Recovery Ability": r"RECOVERY\s*ABILITY\s*\(PNS\s*ZONE\)\s*[:\s]*\b(NORMAL|MEDIUM|LOW)\b",
+        "PNS Index": r"PNS\s*INDEX\s*[:\s]*(-?[\d.]+)",
+        "SNS Index": r"SNS\s*INDEX\s*[:\s]*(-?[\d.]+)",
+        "RMSSD (ms)": r"RMSSD\s*[:\s]*([\d.]+)",
+        "SD1 (ms)": r"SD1\s*[:\s]*([\d.]+)",
+        "SD2 (ms)": r"SD2\s*[:\s]*([\d.]+)",
+        "HRV SDNN (ms)": r"HRV\s*SDNN\s*[:\s]*([\d.]+)",
+        "Hemoglobin (g/dl)": r"HEMOGLOBIN\s*[:\s]*([\d.]+)",
+        "Hemoglobin A1c (%)": r"HEMOGLOBIN\s*A[1IL]C\s*[:\s]*([\d.]+)",
+        "Mean RRi (ms)": r"MEAN\s*RRI\s*[:\s]*([\d.]+)",
+    }
+    features = extract_features_from_text(text, feature_patterns)
+    return pd.DataFrame([features]).reindex(columns=model_features), features
 
-    return scaled_data, data_dict
-
-
-# Predict disease using the XGBoost model
-def predict_disease(file_path):
-    text = extract_text_from_pdf(file_path)
-    if not text:
-        return None, None, None
-
-    processed_data, extracted_features = preprocess_pdf_text(text)
-    dmatrix_data = xgb.DMatrix(processed_data)
-    prediction = xgb_model.predict(dmatrix_data)
-    predicted_class = int(prediction[0].argmax())  # Extract scalar value
-    confidence = prediction[0][predicted_class]  # Get confidence score
-    return disease_labels[predicted_class], confidence, extracted_features
-
-
-# Function to render PDF as images
+# Render PDF pages as images
 def render_pdf(file_path):
     images = []
-    pdf_document = fitz.open(file_path)
-    for page_num in range(len(pdf_document)):
-        page = pdf_document[page_num]
-        pix = page.get_pixmap()
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        images.append(img)
+    with fitz.open(file_path) as pdf:
+        for page_num in range(len(pdf)):
+            page = pdf.load_page(page_num)
+            pix = page.get_pixmap()
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            images.append(img)
     return images
 
+# Streamlit interface
+st.title("Disease Prediction from PDF/Image")
+option = st.radio("Select Input Method:", ["PDF Document", "Camera Image"])
 
-# Streamlit app
-st.title("Disease Prediction from PDF")
+if option == "PDF Document":
+    uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
+    if uploaded_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+            temp_file.write(uploaded_file.getbuffer())
+            temp_path = temp_file.name
 
-# Maintain state for uploaded files and predictions
-if "uploaded_files" not in st.session_state:
-    st.session_state.uploaded_files = []
-if "predictions" not in st.session_state:
-    st.session_state.predictions = {}
+        text, _ = extract_text_from_pdf(temp_path)
 
-# Upload PDF file
-uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
+        feature_df, extracted_features = preprocess_text_to_features(text)
+        col1, col2 = st.columns([1, 1])
 
-if uploaded_file is not None:
-    # Save the uploaded file to a temporary location
-    temp_file_path = f"temp_{uploaded_file.name}"
-    with open(temp_file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
+        with col1:
+            st.subheader("PDF Preview")
+            for img in render_pdf(temp_path):
+                st.image(img, use_container_width=True)
 
-    # Avoid duplicate processing
-    if uploaded_file.name not in st.session_state.uploaded_files:
-        # Process the PDF and store results
-        try:
-            predicted_disease, confidence, extracted_features = predict_disease(
-                temp_file_path
-            )
-            if predicted_disease is not None:
-                # Extract features for display
-                text = extract_text_from_pdf(temp_file_path)
-                extracted_features = preprocess_pdf_text(text)
+        with col2:
+            # Convert DataFrame to DMatrix
+            dmatrix_features = xgb.DMatrix(feature_df)
 
-                # Store results
-                st.session_state.uploaded_files.append(uploaded_file.name)
-                st.session_state.predictions[uploaded_file.name] = (
-                    predicted_disease,
-                    confidence,
-                    extracted_features,
-                )
-            else:
-                st.error("Prediction failed. Please check the input file.")
-        except Exception as e:
-            st.error(f"An error occurred during prediction: {e}")
+            # Make predictions
+            prediction = xgb_model.predict(dmatrix_features)
 
-    # Display the PDF and extracted features in a table
-    col1, col2 = st.columns([2, 3])
-    with col1:
-        st.write("### Uploaded PDF")
-        pdf_images = render_pdf(temp_file_path)
-        for img in pdf_images:
+            # Ensure the prediction is processed correctly
+            try:
+                if prediction.ndim == 2:
+                    # Extract the index of the maximum probability
+                    predicted_label = int(np.argmax(prediction, axis=1)[0])
+                    st.success(f"Prediction: {disease_labels[predicted_label]}")
+                else:
+                    st.error(f"Unexpected prediction format: {prediction}. Please verify the model output.")
+            except Exception as e:
+                st.error(f"Error processing prediction: {e}")
+                st.error(f"Prediction output: {prediction}")
+
+            st.subheader("Extracted Features")
+            st.dataframe(pd.DataFrame(list(extracted_features.items()), columns=["Feature", "Value"]))
+
+elif option == "Camera Image":
+    uploaded_image = st.file_uploader("Upload a camera image", type=["jpg", "jpeg", "png"])
+    if uploaded_image:
+        img = Image.open(uploaded_image)
+        text = image_to_string(img, config="--psm 6")
+        feature_df, extracted_features = preprocess_text_to_features(clean_text(text))
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            st.subheader("Image Preview")
             st.image(img, use_container_width=True)
 
-    with col2:
-        st.write("### Predicted Disease")
-        if uploaded_file.name in st.session_state.predictions:
-            disease, confidence, extracted_features = st.session_state.predictions[
-                uploaded_file.name
-            ]
-            st.success(f"{disease} (Confidence: {confidence:.2f})")
+        with col2:
+            dmatrix_features = xgb.DMatrix(feature_df)
 
-            # Display extracted features in a non-scrollable table
-            st.write("### Extracted Features")
-            feature_table = pd.DataFrame(
-                extracted_features[1].items(), columns=["Feature", "Value"]
-            )
-            st.dataframe(feature_table, use_container_width=True)
+            # Make predictions
+            prediction = xgb_model.predict(dmatrix_features)
 
-    # Optionally clean up temporary files after display
-    if os.path.exists(temp_file_path):
-        os.remove(temp_file_path)
+            # Ensure the prediction is processed correctly
+            try:
+                if prediction.ndim == 2:
+                    # Extract the index of the maximum probability
+                    predicted_label = int(np.argmax(prediction, axis=1)[0])
+                    st.success(f"Prediction: {disease_labels[predicted_label]}")
+                else:
+                    st.error(f"Unexpected prediction format: {prediction}. Please verify the model output.")
+            except Exception as e:
+                st.error(f"Error processing prediction: {e}")
+                st.error(f"Prediction output: {prediction}")
 
-# Show history of uploaded files and predictions
-if st.session_state.uploaded_files:
-    st.write("### Prediction History")
-    for file_name in st.session_state.uploaded_files:
-        disease, confidence, _ = st.session_state.predictions[file_name]
-        st.write(f"- **{file_name}**: {disease} (Confidence: {confidence:.2f})")
+            st.subheader("Extracted Features")
+            st.dataframe(pd.DataFrame(list(extracted_features.items()), columns=["Feature", "Value"]))
