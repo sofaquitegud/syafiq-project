@@ -12,7 +12,16 @@ from pdf2image import convert_from_path
 import cv2
 import logging
 
+# Configure logging
 logging.basicConfig(level=logging.DEBUG)
+
+# Constants
+MODEL_PATH = r"C:\Users\TMRND\Desktop\syafiq-project\classification-task\model\saved_data\xgboost_model.json"
+MAX_PAGES = 3
+
+# Load pre-trained model
+xgb_model = Booster()
+xgb_model.load_model(MODEL_PATH)
 
 # Disease labels mapping
 disease_labels = {
@@ -29,6 +38,7 @@ disease_labels = {
     10: "Stress-related Disorders",
 }
 
+# Model features
 model_features = [
     "Heart Rate (bpm)",
     "Breathing Rate (brpm)",
@@ -48,18 +58,29 @@ model_features = [
     "Hemoglobin (g/dl)",
 ]
 
-# Load pre-trained model
-xgb_model = Booster()
-xgb_model.load_model("xgboost_model.json")
-
 # Improved image preprocessing
 def preprocess_image(image):
     image_cv = np.array(image.convert("L"))  # Grayscale
+    image_cv = cv2.fastNlMeansDenoising(image_cv, None, 30, 7, 21)  # Noise removal
     _, image_cv = cv2.threshold(image_cv, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return Image.fromarray(image_cv)
 
+# Extract text from image
+def extract_text_from_image(image):
+    """Extract text from an image using OCR."""
+    preprocessed_image = preprocess_image(image)
+    ocr_text = image_to_string(preprocessed_image, config="--psm 6")
+    logging.debug(f"OCR Text: {ocr_text}")
+    return clean_text(ocr_text)
+
+# Check if image is clear
+def is_image_clear(image):
+    image_cv = np.array(image.convert("L"))  # Grayscale
+    variance_of_laplacian = cv2.Laplacian(image_cv, cv2.CV_64F).var()
+    return variance_of_laplacian >= 100
+
 # Extract text from PDF with fallback to OCR
-def extract_text_from_pdf(file_path, max_pages=3):
+def extract_text_from_pdf(file_path, max_pages=MAX_PAGES):
     """Extract text from PDF with optional OCR fallback."""
     try:
         with fitz.open(file_path) as pdf_file:
@@ -71,16 +92,10 @@ def extract_text_from_pdf(file_path, max_pages=3):
                 logging.info("Text successfully extracted from PDF.")
                 return clean_text(raw_text), None
 
-        # Fallback to OCR
+        # OCR Fallback
         logging.warning("Direct text extraction failed. Switching to OCR.")
         pages = convert_from_path(file_path, dpi=300, first_page=1, last_page=max_pages)
-        processed_text = []
-        for idx, page in enumerate(pages):
-            preprocessed_image = preprocess_image(page)
-            ocr_text = image_to_string(preprocessed_image, config="--psm 4 --oem 3")
-            logging.debug(f"OCR Text (Page {idx + 1}): {ocr_text}")
-            processed_text.append(ocr_text)
-
+        processed_text = [image_to_string(preprocess_image(page), config="--psm 4 --oem 3") for page in pages]
         ocr_text_combined = clean_text(" ".join(processed_text))
         return ocr_text_combined, pages
 
@@ -92,15 +107,14 @@ def extract_text_from_pdf(file_path, max_pages=3):
 def clean_text(text):
     text = re.sub(r"[^\x00-\x7F]+", " ", text)  # Remove non-ASCII characters
     text = re.sub(r"\$D2|S\$D2", "SD2", text)  # Fix SD2 misrecognitions
+    text = re.sub(r"\$D1|S\$D1", "SD1", text)  # Fix SD1 misrecognitions
     text = re.sub(r"\s*\.\s*", ".", text)  # Remove unnecessary spaces around periods
     text = re.sub(r"\s{2,}", " ", text)  # Replace multiple spaces with a single space
     text = re.sub(r"\s*([0-9]+)\s*\.\s*([0-9]+)", r"\1.\2", text)  # Fix decimal formatting
     return text.strip().upper()
 
-
 # Extract features from text using regex patterns
 def extract_features_from_text(text, rules):
-    # Define default values at the beginning
     default_values = {
         "Heart Rate (bpm)": 70,
         "Breathing Rate (brpm)": 16,
@@ -124,15 +138,22 @@ def extract_features_from_text(text, rules):
         match = re.search(pattern, text, re.DOTALL)
         if match:
             try:
-                return float(match.group(1).replace(",", "."))
+                value = float(match.group(1).replace(",", "."))
+                logging.debug(f"Extracted {pattern}: {value}")
+                return value
             except ValueError:
+                logging.warning(f"ValueError for pattern {pattern}, using default {default_value}")
                 return default_value
+        logging.warning(f"Pattern {pattern} not found, using default {default_value}")
         return default_value
 
     def parse_categorical_feature(pattern, mapping, default_value):
         match = re.search(pattern, text, re.DOTALL)
         if match:
-            return mapping.get(match.group(1).upper(), default_value)
+            value = mapping.get(match.group(1).upper(), default_value)
+            logging.debug(f"Extracted {pattern}: {value}")
+            return value
+        logging.warning(f"Pattern {pattern} not found, using default {default_value}")
         return default_value
 
     features = {}
@@ -147,7 +168,7 @@ def extract_features_from_text(text, rules):
         "PNS Index": r"PNS\s*INDEX\s*[:\s]*(-?[\d.]+)",
         "SNS Index": r"SNS\s*INDEX\s*[:\s]*(-?[\d.]+)",
         "RMSSD (ms)": r"RMSSD\s*[:\s]*([\d.]+)",
-        "SD1 (ms)": r"SD1\s*[:\s]*([\d.]+)",
+        "SD1 (ms)": r"SD1|[^\w]SD1[^\w]*[:\s]*([\d.]+)",
         "SD2 (ms)": r"SD2|[^\w]SD2[^\w]*[:\s]*([\d.]+)",
         "HRV SDNN (ms)": r"HRV\s*SDNN\s*[:\s]*([\d.]+)",
         "Hemoglobin (g/dl)": r"HEMOGLOBIN\s*[:\s]*([\d.]+)",
@@ -166,6 +187,8 @@ def extract_features_from_text(text, rules):
     # Fill missing features with default values
     for key in model_features:
         features.setdefault(key, default_values[key])
+    
+    logging.debug(f"Extracted features: {features}")
     return features
 
 # Process text to features
@@ -188,65 +211,72 @@ def render_pdf(file_path):
 st.title("Disease Prediction from PDF/Image")
 option = st.radio("Select Input Method:", ["PDF Document", "Camera Image"])
 
+def handle_pdf_upload(uploaded_file):
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+        temp_file.write(uploaded_file.getbuffer())
+        temp_path = temp_file.name
+
+    text, _ = extract_text_from_pdf(temp_path)
+    feature_df, extracted_features = preprocess_text_to_features(text)
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        st.subheader("PDF Preview")
+        for img in render_pdf(temp_path):
+            st.image(img, use_container_width=True)
+
+    with col2:
+        dmatrix_features = xgb.DMatrix(feature_df)
+        prediction = xgb_model.predict(dmatrix_features)
+
+        try:
+            if prediction.ndim == 2:
+                predicted_label = int(np.argmax(prediction, axis=1)[0])
+                st.success(f"Prediction: {disease_labels[predicted_label]}")
+            else:
+                st.error(f"Unexpected prediction format: {prediction}.")
+        except Exception as e:
+            st.error(f"Error processing prediction: {e}")
+            st.error(f"Prediction output: {prediction}")
+
+        st.subheader("Extracted Features")
+        st.dataframe(pd.DataFrame(list(extracted_features.items()), columns=["Feature", "Value"]))
+
+def handle_image_upload(uploaded_image):
+    img = Image.open(uploaded_image)
+    if not is_image_clear(img):
+        st.warning("The uploaded image appears to be blurry. Please try again with a clearer image.")
+    text = extract_text_from_image(img)
+    feature_df, extracted_features = preprocess_text_to_features(clean_text(text))
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        st.subheader("Image Preview")
+        st.image(img, use_container_width=True)
+
+    with col2:
+        dmatrix_features = xgb.DMatrix(feature_df)
+        prediction = xgb_model.predict(dmatrix_features)
+
+        try:
+            if prediction.ndim == 2:
+                predicted_label = int(np.argmax(prediction, axis=1)[0])
+                st.success(f"Prediction: {disease_labels[predicted_label]}")
+            else:
+                st.error(f"Unexpected prediction format: {prediction}.")
+        except Exception as e:
+            st.error(f"Error processing prediction: {e}")
+            st.error(f"Prediction output: {prediction}")
+
+        st.subheader("Extracted Features")
+        st.dataframe(pd.DataFrame(list(extracted_features.items()), columns=["Feature", "Value"]))
+
 if option == "PDF Document":
     uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
     if uploaded_file:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
-            temp_file.write(uploaded_file.getbuffer())
-            temp_path = temp_file.name
-
-        text, _ = extract_text_from_pdf(temp_path)
-
-        feature_df, extracted_features = preprocess_text_to_features(text)
-        col1, col2 = st.columns([1, 1])
-
-        with col1:
-            st.subheader("PDF Preview")
-            for img in render_pdf(temp_path):
-                st.image(img, use_container_width=True)
-
-        with col2:
-            dmatrix_features = xgb.DMatrix(feature_df)
-            prediction = xgb_model.predict(dmatrix_features)
-
-            try:
-                if prediction.ndim == 2:
-                    predicted_label = int(np.argmax(prediction, axis=1)[0])
-                    st.success(f"Prediction: {disease_labels[predicted_label]}")
-                else:
-                    st.error(f"Unexpected prediction format: {prediction}.")
-            except Exception as e:
-                st.error(f"Error processing prediction: {e}")
-                st.error(f"Prediction output: {prediction}")
-
-            st.subheader("Extracted Features")
-            st.dataframe(pd.DataFrame(list(extracted_features.items()), columns=["Feature", "Value"]))
+        handle_pdf_upload(uploaded_file)
 
 elif option == "Camera Image":
     uploaded_image = st.file_uploader("Upload a camera image", type=["jpg", "jpeg", "png"])
     if uploaded_image:
-        img = Image.open(uploaded_image)
-        text = image_to_string(img, config="--psm 6")
-        feature_df, extracted_features = preprocess_text_to_features(clean_text(text))
-        col1, col2 = st.columns([1, 1])
-
-        with col1:
-            st.subheader("Image Preview")
-            st.image(img, use_container_width=True)
-
-        with col2:
-            dmatrix_features = xgb.DMatrix(feature_df)
-            prediction = xgb_model.predict(dmatrix_features)
-
-            try:
-                if prediction.ndim == 2:
-                    predicted_label = int(np.argmax(prediction, axis=1)[0])
-                    st.success(f"Prediction: {disease_labels[predicted_label]}")
-                else:
-                    st.error(f"Unexpected prediction format: {prediction}.")
-            except Exception as e:
-                st.error(f"Error processing prediction: {e}")
-                st.error(f"Prediction output: {prediction}")
-
-            st.subheader("Extracted Features")
-            st.dataframe(pd.DataFrame(list(extracted_features.items()), columns=["Feature", "Value"]))
+        handle_image_upload(uploaded_image)
