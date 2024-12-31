@@ -3,7 +3,6 @@ opencv-python==4.10.0.84
 opencv-python-headless==4.10.0.84
 pandas==2.2.3
 pdf2image==1.17.0
-pickleshare @ file:///home/conda/feedstock_root/build_artifacts/pickleshare_1733327343728/work
 pillow==11.0.0
 PyMuPDF==1.25.1
 pyparsing==3.2.0
