@@ -1,27 +1,47 @@
-import fitz
 import numpy as np
 import pandas as pd
-import re
 import streamlit as st
+import fitz
+import re
 import tempfile
-from PIL import Image
-import xgboost as xgb
-from xgboost import Booster
-from pytesseract import image_to_string
-from pdf2image import convert_from_path
 import cv2
 import logging
+import os
+import urllib.request
+import xgboost as xgb
+from xgboost import Booster
+from PIL import Image
+from pytesseract import image_to_string
+from pdf2image import convert_from_path
+
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 
 # Constants
-MODEL_PATH = "C:/Users/TMRND/Desktop/syafiq-project/classification-task/xgboost_model.json"
+MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/classification-task/xgboost_model.json"
+LOCAL_MODEL_PATH = "C:/Users/TMRND/Desktop/syafiq-project/classification-task/xgboost_model.json"
 MAX_PAGES = 3
+
+# Function to download model from GitHub
+def download_model(url, model_path):
+    urllib.request.urlretrieve(url, model_path)
+    logging.info(f"Model downloaded to {model_path}")
+
+# Function to determine whether running on Streamlit Cloud or locally
+def is_st_cloud():
+    return os.environ.get("STREAMLIT_SERVER", "") != ""
+
+# Temporary path where the model will be downloaded in the Streamlit Cloud environment
+model_tmp_path = "/tmp/xgboost_model.json" if is_st_cloud() else LOCAL_MODEL_PATH
+
+# Download the model from GitHub or load locally if running local
+if is_st_cloud():
+    download_model(MODEL_PATH_GITHUB, model_tmp_path)
 
 # Load pre-trained model
 xgb_model = Booster()
-xgb_model.load_model(MODEL_PATH)
+xgb_model.load_model(model_tmp_path)
 
 # Disease labels mapping
 disease_labels = {
@@ -58,7 +78,7 @@ model_features = [
     "Hemoglobin (g/dl)",
 ]
 
-# Improved image preprocessing
+# Image preprocessing
 def preprocess_image(image):
     image_cv = np.array(image.convert("L"))  # Grayscale
     image_cv = cv2.fastNlMeansDenoising(image_cv, None, 30, 7, 21)  # Noise removal
@@ -67,7 +87,6 @@ def preprocess_image(image):
 
 # Extract text from image
 def extract_text_from_image(image):
-    """Extract text from an image using OCR."""
     preprocessed_image = preprocess_image(image)
     ocr_text = image_to_string(preprocessed_image, config="--psm 6")
     logging.debug(f"OCR Text: {ocr_text}")
@@ -79,9 +98,8 @@ def is_image_clear(image):
     variance_of_laplacian = cv2.Laplacian(image_cv, cv2.CV_64F).var()
     return variance_of_laplacian >= 100
 
-# Extract text from PDF with fallback to OCR
+# Extract text from PDF with OCR fallback
 def extract_text_from_pdf(file_path, max_pages=MAX_PAGES):
-    """Extract text from PDF with optional OCR fallback."""
     try:
         with fitz.open(file_path) as pdf_file:
             raw_text = ""
