@@ -16,7 +16,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 # Constants
-MODEL_PATH = r"C:\Users\TMRND\Desktop\syafiq-project\classification-task\model\saved_data\xgboost_model.json"
+MODEL_PATH = "C:/Users/TMRND/Desktop/syafiq-project/classification-task/xgboost_model.json"
 MAX_PAGES = 3
 
 # Load pre-trained model
