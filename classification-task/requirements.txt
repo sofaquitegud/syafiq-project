@@ -1,6 +1,6 @@
 pandas==2.2.3
 numpy==2.0.2
-opencv-python==4.10.0.84
+opencv-python-headless==4.10.0.84
 PyMuPDF==1.25.1
 streamlit==1.41.1
 pillow==11.0.0
