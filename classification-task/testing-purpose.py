@@ -20,8 +20,8 @@ logging.basicConfig(level=logging.DEBUG)
 
 # Constants
 MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/classification-task/xgboost_model.json"
-LOCAL_MODEL_PATH = "C:/Users/TMRND/Desktop/syafiq-project/classification-task/xgboost_model.json"
-MAX_PAGES = 3
+LOCAL_MODEL_PATH = os.path.join(os.getcwd(), "xgboost_model.json")
+MAX_PAGES = st.slider("Number of PDF Pages to process: ", min_value=1, max_value=10, value=3)
 
 # Function to download model from GitHub
 def download_model(url, model_path):
@@ -30,7 +30,10 @@ def download_model(url, model_path):
 
 # Function to determine whether running on Streamlit Cloud or locally
 def is_st_cloud():
-    return os.environ.get("STREAMLIT_SERVER", "") != ""
+    try:
+        return os.environ.get("STREAMLIT_SERVER", "") != ""
+    except KeyError:
+        return False
 
 # Temporary path where the model will be downloaded in the Streamlit Cloud environment
 model_tmp_path = "/tmp/xgboost_model.json" if is_st_cloud() else LOCAL_MODEL_PATH
@@ -41,7 +44,12 @@ if is_st_cloud():
 
 # Load pre-trained model
 xgb_model = Booster()
-xgb_model.load_model(model_tmp_path)
+try:
+    xgb_model.load_model(model_tmp_path)
+    logging.info("Model loaded successfully.")
+except Exception as e:
+    logging.error(f"Error loading model: {e}")
+    st.error("Unable to load the model. Please check the model path or URL.")
 
 # Disease labels mapping
 disease_labels = {
@@ -89,7 +97,7 @@ def preprocess_image(image):
 def extract_text_from_image(image):
     preprocessed_image = preprocess_image(image)
     ocr_text = image_to_string(preprocessed_image, config="--psm 6")
-    logging.debug(f"OCR Text: {ocr_text}")
+    logging.debug(f"OCR Text: {ocr_text[:200]}") # Log only the first 200 characters
     return clean_text(ocr_text)
 
 # Check if image is clear
@@ -215,10 +223,10 @@ def preprocess_text_to_features(text):
     return pd.DataFrame([features]).reindex(columns=model_features), features
 
 # Render PDF as images for preview
-def render_pdf(file_path):
+def render_pdf(file_path, max_pages=MAX_PAGES):
     images = []
     with fitz.open(file_path) as pdf:
-        for page_num in range(len(pdf)):
+        for page_num in range(min(len(pdf), max_pages)):
             page = pdf.load_page(page_num)
             pix = page.get_pixmap()
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
