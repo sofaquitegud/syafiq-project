@@ -25,8 +25,11 @@ MAX_PAGES = 3
 
 # Function to download model from GitHub
 def download_model(url, model_path):
-    urllib.request.urlretrieve(url, model_path)
-    logging.info(f"Model downloaded to {model_path}")
+    try:
+        urllib.request.urlretrieve(url, model_path)
+        logging.info(f"Model downloaded to {model_path}")
+    except Exception as e:
+        logging.error(f"Failed to download model: {e}")
 
 # Function to determine whether running on Streamlit Cloud or locally
 def is_st_cloud():
@@ -37,6 +40,7 @@ def is_st_cloud():
 
 # Temporary path where the model will be downloaded in the Streamlit Cloud environment
 model_tmp_path = "/tmp/xgboost_model.json" if is_st_cloud() else LOCAL_MODEL_PATH
+logging.debug(f"Model path set to : {model_tmp_path}")
 
 # Download the model from GitHub or load locally if running local
 if is_st_cloud():
@@ -44,12 +48,14 @@ if is_st_cloud():
 
 # Load pre-trained model
 xgb_model = Booster()
-try:
+
+# Check if the file exists
+if os.path.exists(model_tmp_path):
     xgb_model.load_model(model_tmp_path)
     logging.info("Model loaded successfully.")
-except Exception as e:
-    logging.error(f"Error loading model: {e}")
-    st.error("Unable to load the model. Please check the model path or URL.")
+else:
+    logging.error(f"Model file does not exist at {model_tmp_path}")
+    st.error("Model file does not exist. Please ensure the model is downloaded correctly.")
 
 # Disease labels mapping
 disease_labels = {
