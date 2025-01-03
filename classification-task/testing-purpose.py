@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.DEBUG)
 # Constants
 MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/classification-task/xgboost_model.json"
 LOCAL_MODEL_PATH = os.path.join(os.getcwd(), "xgboost_model.json")
-MAX_PAGES = st.slider("Number of PDF Pages to process: ", min_value=1, max_value=10, value=3)
+MAX_PAGES = 3
 
 # Function to download model from GitHub
 def download_model(url, model_path):
