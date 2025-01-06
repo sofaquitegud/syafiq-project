@@ -19,7 +19,7 @@ from pdf2image import convert_from_path
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 
-pytesseract.pytesseract.tesseract_cmd = "C:/Program Files/Tesseract-OCR/tesseract.exe"
+pytesseract.pytesseract.tesseract_cmd = "usr/bin/tesseract"
 
 # Constants
 MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/classification-task/xgboost_model.json"
