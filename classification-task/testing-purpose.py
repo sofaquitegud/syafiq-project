@@ -11,8 +11,6 @@ import urllib.request
 import xgboost as xgb
 from xgboost import Booster
 from PIL import Image
-import pytesseract
-pytesseract.pytesseract.tesseract_cmd = "C:/Program Files/Tesseract-OCR/tesseract.exe"
 from pytesseract import image_to_string
 from pdf2image import convert_from_path
 
