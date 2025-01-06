@@ -23,36 +23,43 @@ MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-proje
 LOCAL_MODEL_PATH = os.path.join(os.getcwd(), "xgboost_model.json")
 MAX_PAGES = 3
 
-# Function to download model from GitHub
-def download_model(url, model_path):
-    try:
-        urllib.request.urlretrieve(url, model_path)
-        logging.info(f"Model downloaded to {model_path}")
-    except Exception as e:
-        logging.error(f"Failed to download model: {e}")
-
 # Function to determine whether running on Streamlit Cloud or locally
 def is_st_cloud():
-    try:
-        return os.environ.get("STREAMLIT_SERVER", "") != ""
-    except KeyError:
-        return False
+    return "HOME" in os.environ and os.environ['HOME'] == "/app"
 
 # Temporary path where the model will be downloaded in the Streamlit Cloud environment
 model_tmp_path = "/tmp/xgboost_model.json" if is_st_cloud() else LOCAL_MODEL_PATH
 logging.debug(f"Model path set to : {model_tmp_path}")
 
+# Function to download model from GitHub
+def download_model(url, model_path):
+    try:
+        urllib.request.urlretrieve(url, model_path)
+        if os.path.exists(model_path):
+            logging.info(f"Model successfully downloaded to {model_path}")
+        else:
+            raise FileNotFoundError("Model file was not found after download")
+    except Exception as e:
+        logging.error(f"Failed to download model: {e}")
+        st.error("Model file failed to download. Please try again.")
+
 # Download the model from GitHub or load locally if running local
 if is_st_cloud():
-    download_model(MODEL_PATH_GITHUB, model_tmp_path)
+    if not os.path.exists(model_tmp_path):
+        logging.info("Downloading model for Streamlit Cloud...")
+        download_model(MODEL_PATH_GITHUB, model_tmp_path)
 
 # Load pre-trained model
 xgb_model = Booster()
 
 # Check if the file exists
 if os.path.exists(model_tmp_path):
-    xgb_model.load_model(model_tmp_path)
-    logging.info("Model loaded successfully.")
+    try:
+        xgb_model.load_model(model_tmp_path)
+        logging.info("Model loaded successfully.")
+    except Exception as e:
+        logging.error(f"Failed to load model: {e}")
+        st.error("Failed to load the model. Please check the file format.")
 else:
     logging.error(f"Model file does not exist at {model_tmp_path}")
     st.error("Model file does not exist. Please ensure the model is downloaded correctly.")
