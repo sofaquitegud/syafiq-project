@@ -8,6 +8,7 @@ import cv2
 import logging
 import os
 import urllib.request
+import shutil
 import pytesseract
 import xgboost as xgb
 from xgboost import Booster
@@ -19,7 +20,12 @@ from pdf2image import convert_from_path
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 
-pytesseract.pytesseract.tesseract_cmd = "usr/bin/tesseract"
+# Locate tesseract executable
+tesseract_path = shutil.which("tesseract")
+if tesseract_path:
+    pytesseract.pytesseract.tesseract_cmd = tesseract_path
+else:
+    raise EnvironmentError("Tesseract executable not found. Ensure it is installed and added to PATH.")
 
 # Constants
 MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/classification-task/xgboost_model.json"
