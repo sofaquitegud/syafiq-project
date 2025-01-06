@@ -147,9 +147,11 @@ def extract_text_from_pdf(file_path, max_pages=MAX_PAGES):
 # Clean extracted text
 def clean_text(text):
     text = re.sub(r"[^\x00-\x7F]+", " ", text)  # Remove non-ASCII characters
+    text = text.replace("−", "-")  # Fix OCR misrecognition of hyphen
     text = re.sub(r"\$D2|S\$D2", "SD2", text)  # Fix SD2 misrecognitions
     text = re.sub(r"\$D1|S\$D1", "SD1", text)  # Fix SD1 misrecognitions
     text = re.sub(r"\s*\.\s*", ".", text)  # Remove unnecessary spaces around periods
+    text = re.sub(r"(\s|^)_(\d)", r"\1-\2", text)  # Replace `_` with `-` if followed by a digit
     text = re.sub(r"\s{2,}", " ", text)  # Replace multiple spaces with a single space
     text = re.sub(r"\s*([0-9]+)\s*\.\s*([0-9]+)", r"\1.\2", text)  # Fix decimal formatting
     return text.strip().upper()
@@ -206,7 +208,7 @@ def extract_features_from_text(text, rules):
         "Blood Pressure (diastolic)": r"BLOOD\s*PRESSURE\s*[:\s]*[\d]+\/([\d]+)",
         "Stress Index": r"STRESS\s*INDEX\s*[:\s]*([\d.]+)",
         "Recovery Ability": r"RECOVERY\s*ABILITY\s*\(PNS\s*ZONE\)\s*[:\s]*\b(NORMAL|MEDIUM|LOW)\b",
-        "PNS Index": r"PNS\s*INDEX\s*[:\s]*(-?[\d.]+)",
+        "PNS Index": r"PNS\s*INDEX\s*[:\s]*(-?[\d]+(?:\.\d+)?)",
         "SNS Index": r"SNS\s*INDEX\s*[:\s]*(-?[\d.]+)",
         "RMSSD (ms)": r"RMSSD\s*[:\s]*([\d.]+)",
         "SD1 (ms)": r"SD1|[^\w]SD1[^\w]*[:\s]*([\d.]+)",
