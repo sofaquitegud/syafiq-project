@@ -23,46 +23,45 @@ MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-proje
 LOCAL_MODEL_PATH = os.path.join(os.getcwd(), "xgboost_model.json")
 MAX_PAGES = 3
 
-# Function to determine whether running on Streamlit Cloud or locally
-def is_st_cloud():
-    return "HOME" in os.environ and os.environ['HOME'] == "/app"
+# Determine environment-specific model path
+def get_model_path():
+    if "HOME" is os.environ and os.environ["HOME"] == "/app":
+        return "/tmp/xgboost_model.json"
+    return LOCAL_MODEL_PATH
 
-# Temporary path where the model will be downloaded in the Streamlit Cloud environment
-model_tmp_path = "/tmp/xgboost_model.json" if is_st_cloud() else LOCAL_MODEL_PATH
-logging.debug(f"Model path set to : {model_tmp_path}")
+model_tmp_path = get_model_path()
+logging.debug(f"Model path set to: {model_tmp_path}")
 
-# Function to download model from GitHub
+# Function to download the model file
 def download_model(url, model_path):
     try:
+        logging.info(f"Attempting to download the model from {url} to {model_path}")
         urllib.request.urlretrieve(url, model_path)
         if os.path.exists(model_path):
-            logging.info(f"Model successfully downloaded to {model_path}")
+            logging.info("Model successfully downloaded.")
         else:
-            raise FileNotFoundError("Model file was not found after download")
+            raise FileNotFoundError(f"Model download failed. File does not exist at {model_path}.")
     except Exception as e:
         logging.error(f"Failed to download model: {e}")
-        st.error("Model file failed to download. Please try again.")
+        st.error(f"Error downloading the model. Ensure access to {url}.")
 
-# Download the model from GitHub or load locally if running local
-if is_st_cloud():
-    if not os.path.exists(model_tmp_path):
-        logging.info("Downloading model for Streamlit Cloud...")
-        download_model(MODEL_PATH_GITHUB, model_tmp_path)
+# Ensure the model file is available
+if not os.path.exists(model_tmp_path):
+    logging.info("Model file not found. Downloading...")
+    download_model(MODEL_PATH_GITHUB, model_tmp_path)
 
-# Load pre-trained model
+# Load model
 xgb_model = Booster()
-
-# Check if the file exists
 if os.path.exists(model_tmp_path):
     try:
         xgb_model.load_model(model_tmp_path)
         logging.info("Model loaded successfully.")
     except Exception as e:
-        logging.error(f"Failed to load model: {e}")
-        st.error("Failed to load the model. Please check the file format.")
+        logging.error(f"Error loading model: {e}")
+        st.error("Failed to load the model. Please verify the file format.")
 else:
     logging.error(f"Model file does not exist at {model_tmp_path}")
-    st.error("Model file does not exist. Please ensure the model is downloaded correctly.")
+    st.error("Model file does not exist. Please check the download process.")
 
 # Disease labels mapping
 disease_labels = {
