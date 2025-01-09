@@ -12,7 +12,7 @@ import shutil
 import pytesseract
 import xgboost as xgb
 from xgboost import Booster
-from PIL import Image
+from PIL import Image, ExifTags
 from pytesseract import image_to_string
 from pdf2image import convert_from_path
 
@@ -29,7 +29,7 @@ else:
 
 # Constants
 MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/classification-task/xgboost_model.json"
-LOCAL_MODEL_PATH = os.path.join(os.getcwd(), "xgboost_model.json")
+LOCAL_MODEL_PATH = os.path.join(os.getcwd(), "C:/Users/TMRND/Desktop/syafiq-project/xgboost_model.json")
 MAX_PAGES = 3
 
 # Function to download model from GitHub
@@ -107,6 +107,23 @@ def preprocess_image(image):
     image_cv = cv2.fastNlMeansDenoising(image_cv, None, 30, 7, 21)  # Noise removal
     _, image_cv = cv2.threshold(image_cv, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return Image.fromarray(image_cv)
+
+def correct_image_orientation(image):
+    try:
+        for orientation in ExifTags.TAGS.keys():
+            if ExifTags.TAGS[orientation] == 'Orientation':
+                break
+        exif = image._getexif()
+        if exif and orientation in exif:
+            if exif[orientation] == 3:
+                image = image.rotate(180, expand=True)
+            elif exif[orientation] == 6:
+                image = image.rotate(270, expand=True)
+            elif exif[orientation] == 8:
+                image = image.rotate(90, expand=True)
+    except AttributeError:
+        pass
+    return image
 
 # Extract text from image
 def extract_text_from_image(image):
@@ -288,6 +305,7 @@ def handle_pdf_upload(uploaded_file):
 
 def handle_image_upload(uploaded_image):
     img = Image.open(uploaded_image)
+    img = correct_image_orientation(img)
     if not is_image_clear(img):
         st.warning("The uploaded image appears to be blurry. Please try again with a clearer image.")
     text = extract_text_from_image(img)
