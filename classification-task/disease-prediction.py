@@ -42,10 +42,7 @@ def download_model(url, model_path):
 
 # Function to determine whether running on Streamlit Cloud or locally
 def is_st_cloud():
-    try:
-        return os.environ.get("STREAMLIT_SERVER", "") != ""
-    except KeyError:
-        return False
+    return os.environ.get("STREAMLIT_SERVER", "") != ""
 
 # Temporary path where the model will be downloaded in the Streamlit Cloud environment
 model_tmp_path = "/tmp/xgboost_model.json" if is_st_cloud() else LOCAL_MODEL_PATH
@@ -57,8 +54,6 @@ if is_st_cloud():
 
 # Load pre-trained model
 xgb_model = Booster()
-
-# Check if the file exists
 if os.path.exists(model_tmp_path):
     xgb_model.load_model(model_tmp_path)
     logging.info("Model loaded successfully.")
@@ -101,12 +96,32 @@ model_features = [
     "Hemoglobin (g/dl)",
 ]
 
+def evaluate_ocr_quality(ocr_text):
+    """
+    Evaluate OCR text quality based on expected keywords and patterns
+    """
+    required_features = []
+    return any(feature in ocr_text for feature in required_features)
+
 # Image preprocessing
 def preprocess_image(image):
-    image_cv = np.array(image.convert("L"))  # Grayscale
-    image_cv = cv2.fastNlMeansDenoising(image_cv, None, 30, 7, 21)  # Noise removal
-    _, image_cv = cv2.threshold(image_cv, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    return Image.fromarray(image_cv)
+    """
+    Dynamically preprocess the image using Otsu's method first, and fallback to adaptive thresholding if needed.
+    """
+    # Convert to grayscale
+    image_cv = np.array(image.convert("L"))
+    # Apply noise removal
+    image_cv = cv2.fastNlMeansDenoising(image_cv, None, 30, 7, 21)
+    # Otsu's method for uploading image through Streamlit
+    _, otsu_image = cv2.threshold(image_cv, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # Check OCR result from Otsu's method
+    ocr_text = extract_text_from_image(Image.fromarray(otsu_image))
+    if evaluate_ocr_quality(ocr_text):
+        return Image.fromarray(otsu_image)
+    
+    # Adaptive thresholding as fallback
+    adaptive_image = cv2.adaptiveThreshold(image_cv, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    return Image.fromarray(adaptive_image)
 
 def correct_image_orientation(image):
     try:
