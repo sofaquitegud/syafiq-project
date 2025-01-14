@@ -96,13 +96,6 @@ model_features = [
     "Hemoglobin (g/dl)",
 ]
 
-def evaluate_ocr_quality(ocr_text):
-    """
-    Evaluate OCR text quality based on expected keywords and patterns
-    """
-    required_features = []
-    return any(feature in ocr_text for feature in required_features)
-
 # Image preprocessing
 def preprocess_image(image):
     """
@@ -114,10 +107,7 @@ def preprocess_image(image):
     image_cv = cv2.fastNlMeansDenoising(image_cv, None, 30, 7, 21)
     # Otsu's method for uploading image through Streamlit
     _, otsu_image = cv2.threshold(image_cv, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    # Check OCR result from Otsu's method
-    ocr_text = extract_text_from_image(Image.fromarray(otsu_image))
-    if evaluate_ocr_quality(ocr_text):
-        return Image.fromarray(otsu_image)
+    return Image.fromarray(otsu_image)
     
     # Adaptive thresholding as fallback
     adaptive_image = cv2.adaptiveThreshold(image_cv, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
@@ -142,10 +132,14 @@ def correct_image_orientation(image):
 
 # Extract text from image
 def extract_text_from_image(image):
-    preprocessed_image = preprocess_image(image)
-    ocr_text = image_to_string(preprocessed_image, config="--psm 6")
-    logging.debug(f"OCR Text: {ocr_text[:200]}") # Log only the first 200 characters
-    return clean_text(ocr_text)
+    try:
+        preprocessed_image = preprocess_image(image)
+        ocr_text = image_to_string(preprocessed_image, config="--psm 6")
+        logging.debug(f"OCR Text: {ocr_text[:200]}")
+        return clean_text(ocr_text)
+    except Exception as e:
+        logging.error(f"Error in extract_text_from_image: {e}")
+        return ""
 
 # Check if image is clear
 def is_image_clear(image):
@@ -322,31 +316,27 @@ def handle_image_upload(uploaded_image):
     img = Image.open(uploaded_image)
     img = correct_image_orientation(img)
     if not is_image_clear(img):
-        st.warning("The uploaded image appears to be blurry. Please try again with a clearer image.")
+        st.warning("The uploaded image appears to be blurry. Please upload with a clearer image.")
     text = extract_text_from_image(img)
     feature_df, extracted_features = preprocess_text_to_features(clean_text(text))
     col1, col2 = st.columns([1, 1])
-
     with col1:
         st.subheader("Image Preview")
         st.image(img, use_container_width=True)
-
     with col2:
-        dmatrix_features = xgb.DMatrix(feature_df)
-        prediction = xgb_model.predict(dmatrix_features)
-
         try:
+            dmatrix_features = xgb.DMatrix(feature_df)
+            prediction = xgb_model.predict(dmatrix_features)
             if prediction.ndim == 2:
                 predicted_label = int(np.argmax(prediction, axis=1)[0])
                 st.success(f"Prediction: {disease_labels[predicted_label]}")
             else:
-                st.error(f"Unexpected prediction format: {prediction}.")
+                st.error("Unexpected prediction format.")
         except Exception as e:
             st.error(f"Error processing prediction: {e}")
-            st.error(f"Prediction output: {prediction}")
-
         st.subheader("Extracted Features")
         st.dataframe(pd.DataFrame(list(extracted_features.items()), columns=["Feature", "Value"]))
+
 
 if option == "PDF Document":
     uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
