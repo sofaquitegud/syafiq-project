@@ -168,15 +168,15 @@ def extract_text_from_pdf(file_path, max_pages=MAX_PAGES):
 
 # Clean extracted text
 def clean_text(text):
-    text = re.sub(r"[^\x00-\x7F]+", " ", text) # Remove non-ASCII characters
-    text = text.replace("−", "-") # Fix OCR misrecognition of hyphen
-    text = re.sub(r"\$D2|S\$D2|SD-2|S-D2", "SD2", text) # Fix SD2 misrecognitions
-    text = re.sub(r"\$D1|S\$D1|SD-1|S-D1", "SD1", text) # Fix SD1 misrecognitions
-    text = re.sub(r"PNS\s*INDEX[:\s]*O", "PNS INDEX: 0", text) # Fix common OCR misreading of '0'
-    text = re.sub(r"\s*\.\s*", ".", text) # Remove unnecessary spaces around periods
-    text = re.sub(r"(\s|^)_(\d)", r"\1-\2", text) # Replace `_` with `-` if followed by a digit
-    text = re.sub(r"\s{2,}", " ", text) # Replace multiple spaces with a single space
-    text = re.sub(r"\s*([0-9]+)\s*\.\s*([0-9]+)", r"\1.\2", text) # Fix decimal formatting
+    text = re.sub(r"[^\x00-\x7F]+", " ", text)  # Remove non-ASCII characters
+    text = text.replace("−", "-")  # Fix OCR misrecognition of hyphen
+    text = re.sub(r"\$D2|S\$D2|SD-2|S-D2", "SD2", text)  # Fix SD2 misrecognitions
+    text = re.sub(r"\$D1|S\$D1|SD-1|S-D1", "SD1", text)  # Fix SD1 misrecognitions
+    text = re.sub(r"PNS\s*INDEX[:\s]*O", "PNS INDEX: 0", text)  # Fix common OCR misreading of '0'
+    text = re.sub(r"\s*\.\s*", ".", text)  # Remove unnecessary spaces around periods
+    text = re.sub(r"(\s|^)_(\d)", r"\1-\2", text)  # Replace `_` with `-` if followed by a digit
+    text = re.sub(r"\s{2,}", " ", text)  # Replace multiple spaces with a single space
+    text = re.sub(r"\s*([0-9]+)\s*\.\s*([0-9]+)", r"\1.\2", text)  # Fix decimal formatting
     return text.strip().upper()
 
 # Extract features from text using regex patterns
