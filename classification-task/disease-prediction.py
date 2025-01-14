@@ -108,10 +108,6 @@ def preprocess_image(image):
     # Otsu's method for uploading image through Streamlit
     _, otsu_image = cv2.threshold(image_cv, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return Image.fromarray(otsu_image)
-    
-    # Adaptive thresholding as fallback
-    adaptive_image = cv2.adaptiveThreshold(image_cv, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-    return Image.fromarray(adaptive_image)
 
 def correct_image_orientation(image):
     try:
