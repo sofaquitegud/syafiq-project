@@ -181,46 +181,27 @@ def clean_text(text):
 
 # Extract features from text using regex patterns
 def extract_features_from_text(text, rules):
-    default_values = {
-        "Heart Rate (bpm)": 70,
-        "Breathing Rate (brpm)": 16,
-        "Oxygen Saturation (%)": 98,
-        "Blood Pressure (systolic)": 120,
-        "Blood Pressure (diastolic)": 80,
-        "Stress Index": 50,
-        "Recovery Ability": 0,
-        "PNS Index": 0.0,
-        "SNS Index": 0.5,
-        "RMSSD (ms)": 40,
-        "SD2 (ms)": 40,
-        "Hemoglobin A1c (%)": 5.4,
-        "Mean RRi (ms)": 900,
-        "SD1 (ms)": 30,
-        "HRV SDNN (ms)": 50,
-        "Hemoglobin (g/dl)": 14.0,
-    }
-
-    def parse_feature(pattern, default_value):
+    def parse_feature(pattern):
         match = re.search(pattern, text, re.DOTALL)
-        if match:
+        if match and match.group(1):
             try:
                 value = float(match.group(1).replace(",", "."))
                 logging.debug(f"Extracted {pattern}: {value}")
                 return value
             except ValueError:
-                logging.warning(f"ValueError for pattern {pattern}, using default {default_value}")
-                return default_value
-        logging.warning(f"Pattern {pattern} not found, using default {default_value}")
-        return default_value
+                logging.warning(f"ValueError for pattern {pattern}, setting value to 0")
+                return 0
+        logging.warning(f"Pattern {pattern} did not match or group(1) was None, setting value to 0")
+        return 0
 
-    def parse_categorical_feature(pattern, mapping, default_value):
+    def parse_categorical_feature(pattern, mapping):
         match = re.search(pattern, text, re.DOTALL)
         if match:
-            value = mapping.get(match.group(1).upper(), default_value)
+            value = mapping.get(match.group(1).upper(), 0)
             logging.debug(f"Extracted {pattern}: {value}")
             return value
-        logging.warning(f"Pattern {pattern} not found, using default {default_value}")
-        return default_value
+        logging.warning(f"Pattern {pattern} not found, setting value to 0")
+        return 0
 
     features = {}
     feature_patterns = {
@@ -245,14 +226,14 @@ def extract_features_from_text(text, rules):
     for feature, pattern in feature_patterns.items():
         if feature == "Recovery Ability":
             features[feature] = parse_categorical_feature(
-                pattern, {"NORMAL": 0, "MEDIUM": 1, "LOW": 2}, default_values[feature]
+                pattern, {"NORMAL": 0, "MEDIUM": 1, "LOW": 2}
             )
         else:
-            features[feature] = parse_feature(pattern, default_values[feature])
+            features[feature] = parse_feature(pattern)
 
-    # Fill missing features with default values
+    # Fill missing features with None if not extracted
     for key in model_features:
-        features.setdefault(key, default_values[key])
+        features.setdefault(key, None)
     
     logging.debug(f"Extracted features: {features}")
     return features
