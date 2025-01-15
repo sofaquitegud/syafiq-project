@@ -98,16 +98,15 @@ model_features = [
 
 # Image preprocessing
 def preprocess_image(image):
-    """
-    Dynamically preprocess the image using Otsu's method first, and fallback to adaptive thresholding if needed.
-    """
     # Convert to grayscale
     image_cv = np.array(image.convert("L"))
-    # Apply noise removal
-    image_cv = cv2.fastNlMeansDenoising(image_cv, None, 30, 7, 21)
-    # Otsu's method for uploading image through Streamlit
-    _, otsu_image = cv2.threshold(image_cv, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    return Image.fromarray(otsu_image)
+    # Apply mild denoising
+    denoised = cv2.fastNlMeansDenoising(image_cv, h=30, templateWindowSize=7, searchWindowSize=21)
+    # Apply adaptive thresholding for better text contrast
+    thresholded = cv2.adaptiveThreshold(
+        denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 10
+    )
+    return Image.fromarray(thresholded)
 
 def correct_image_orientation(image):
     try:
@@ -130,7 +129,7 @@ def correct_image_orientation(image):
 def extract_text_from_image(image):
     try:
         preprocessed_image = preprocess_image(image)
-        ocr_text = image_to_string(preprocessed_image, config="--psm 6")
+        ocr_text = image_to_string(preprocessed_image, config="--psm 4 --oem 3")
         logging.debug(f"OCR Text: {ocr_text[:200]}")
         return clean_text(ocr_text)
     except Exception as e:
@@ -258,6 +257,22 @@ def render_pdf(file_path, max_pages=MAX_PAGES):
 st.title("Disease Prediction from PDF/Image")
 option = st.radio("Select Input Method:", ["PDF Document", "Camera Image"])
 
+def process_extracted_features(feature_df, extracted_features, col2):
+    try:
+        dmatrix_features = xgb.DMatrix(feature_df)
+        prediction = xgb_model.predict(dmatrix_features)
+
+        if prediction.ndim == 2:
+            predicted_label = int(np.argmax(prediction, axis=1)[0])
+            col2.success(f"Prediction: {disease_labels[predicted_label]}")
+        else:
+            col2.error("Unexpected prediction format.")
+    except Exception as e:
+        col2.error(f"Error processing prediction: {e}")
+    
+    col2.subheader("Extracted Features")
+    col2.dataframe(pd.DataFrame(list(extracted_features.items()), columns=["Feature", "Value"]))
+
 def handle_pdf_upload(uploaded_file):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
         temp_file.write(uploaded_file.getbuffer())
@@ -273,46 +288,25 @@ def handle_pdf_upload(uploaded_file):
             st.image(img, use_container_width=True)
 
     with col2:
-        dmatrix_features = xgb.DMatrix(feature_df)
-        prediction = xgb_model.predict(dmatrix_features)
-
-        try:
-            if prediction.ndim == 2:
-                predicted_label = int(np.argmax(prediction, axis=1)[0])
-                st.success(f"Prediction: {disease_labels[predicted_label]}")
-            else:
-                st.error(f"Unexpected prediction format: {prediction}.")
-        except Exception as e:
-            st.error(f"Error processing prediction: {e}")
-            st.error(f"Prediction output: {prediction}")
-
-        st.subheader("Extracted Features")
-        st.dataframe(pd.DataFrame(list(extracted_features.items()), columns=["Feature", "Value"]))
+        process_extracted_features(feature_df, extracted_features, col2)
 
 def handle_image_upload(uploaded_image):
     img = Image.open(uploaded_image)
     img = correct_image_orientation(img)
+
     if not is_image_clear(img):
         st.warning("The uploaded image appears to be blurry. Please upload with a clearer image.")
+
     text = extract_text_from_image(img)
     feature_df, extracted_features = preprocess_text_to_features(clean_text(text))
     col1, col2 = st.columns([1, 1])
+
     with col1:
+
         st.subheader("Image Preview")
         st.image(img, use_container_width=True)
     with col2:
-        try:
-            dmatrix_features = xgb.DMatrix(feature_df)
-            prediction = xgb_model.predict(dmatrix_features)
-            if prediction.ndim == 2:
-                predicted_label = int(np.argmax(prediction, axis=1)[0])
-                st.success(f"Prediction: {disease_labels[predicted_label]}")
-            else:
-                st.error("Unexpected prediction format.")
-        except Exception as e:
-            st.error(f"Error processing prediction: {e}")
-        st.subheader("Extracted Features")
-        st.dataframe(pd.DataFrame(list(extracted_features.items()), columns=["Feature", "Value"]))
+        process_extracted_features(feature_df, extracted_features, col2)
 
 
 if option == "PDF Document":
