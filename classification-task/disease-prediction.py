@@ -16,23 +16,15 @@ from PIL import Image, ExifTags
 from pytesseract import image_to_string
 from pdf2image import convert_from_path
 
-
-# Configure logging
 logging.basicConfig(level=logging.DEBUG)
 
-# Locate tesseract executable
 tesseract_path = shutil.which("tesseract")
-if tesseract_path:
-    pytesseract.pytesseract.tesseract_cmd = tesseract_path
-else:
-    raise EnvironmentError("Tesseract executable not found. Ensure it is installed and added to PATH.")
+pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
-# Constants
 MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/classification-task/xgboost_model.json"
 LOCAL_MODEL_PATH = os.path.join(os.getcwd(), "C:/Users/TMRND/Desktop/syafiq-project/xgboost_model.json")
 MAX_PAGES = 3
 
-# Function to download model from GitHub
 def download_model(url, model_path):
     try:
         urllib.request.urlretrieve(url, model_path)
@@ -52,7 +44,6 @@ logging.debug(f"Model path set to : {model_tmp_path}")
 if is_st_cloud():
     download_model(MODEL_PATH_GITHUB, model_tmp_path)
 
-# Load pre-trained model
 xgb_model = Booster()
 if os.path.exists(model_tmp_path):
     xgb_model.load_model(model_tmp_path)
@@ -61,7 +52,6 @@ else:
     logging.error(f"Model file does not exist at {model_tmp_path}")
     st.error("Model file does not exist. Please ensure the model is downloaded correctly.")
 
-# Disease labels mapping
 disease_labels = {
     0: "Anaemia",
     1: "Arrhythmia",
@@ -76,27 +66,13 @@ disease_labels = {
     10: "Stress-related Disorders",
 }
 
-# Model features
 model_features = [
-    "Heart Rate (bpm)",
-    "Breathing Rate (brpm)",
-    "Oxygen Saturation (%)",
-    "Blood Pressure (systolic)",
-    "Blood Pressure (diastolic)",
-    "Stress Index",
-    "Recovery Ability",
-    "PNS Index",
-    "SNS Index",
-    "RMSSD (ms)",
-    "SD2 (ms)",
-    "Hemoglobin A1c (%)",
-    "Mean RRi (ms)",
-    "SD1 (ms)",
-    "HRV SDNN (ms)",
+    "Heart Rate (bpm)", "Breathing Rate (brpm)", "Oxygen Saturation (%)", "Blood Pressure (systolic)",
+    "Blood Pressure (diastolic)", "Stress Index", "Recovery Ability", "PNS Index", "SNS Index",
+    "RMSSD (ms)", "SD2 (ms)", "Hemoglobin A1c (%)", "Mean RRi (ms)", "SD1 (ms)", "HRV SDNN (ms)",
     "Hemoglobin (g/dl)",
 ]
 
-# Image preprocessing
 def preprocess_image(image):
     # Convert to grayscale
     image_cv = np.array(image.convert("L"))
@@ -125,47 +101,32 @@ def correct_image_orientation(image):
         pass
     return image
 
-# Extract text from image
 def extract_text_from_image(image):
     try:
         preprocessed_image = preprocess_image(image)
-        ocr_text = image_to_string(preprocessed_image, config="--psm 4 --oem 3")
+        ocr_text = image_to_string(preprocessed_image, config="--psm 6 --oem 1")
         logging.debug(f"OCR Text: {ocr_text[:200]}")
         return clean_text(ocr_text)
     except Exception as e:
         logging.error(f"Error in extract_text_from_image: {e}")
         return ""
 
-# Check if image is clear
 def is_image_clear(image):
-    image_cv = np.array(image.convert("L"))  # Grayscale
+    image_cv = np.array(image.convert("L"))
     variance_of_laplacian = cv2.Laplacian(image_cv, cv2.CV_64F).var()
     return variance_of_laplacian >= 100
 
 # Extract text from PDF with OCR fallback
 def extract_text_from_pdf(file_path, max_pages=MAX_PAGES):
-    try:
-        with fitz.open(file_path) as pdf_file:
-            raw_text = ""
-            for page_num in range(min(len(pdf_file), max_pages)):
-                page_text = pdf_file[page_num].get_text("text")
-                raw_text += page_text
+    with fitz.open(file_path) as pdf_file:
+        raw_text = ""
+        for page_num in range(min(len(pdf_file), max_pages)):
+            page_text = pdf_file[page_num].get_text("text")
+            raw_text += page_text
             if raw_text.strip():
                 logging.info("Text successfully extracted from PDF.")
                 return clean_text(raw_text), None
 
-        # OCR Fallback
-        logging.warning("Direct text extraction failed. Switching to OCR.")
-        pages = convert_from_path(file_path, dpi=300, first_page=1, last_page=max_pages)
-        processed_text = [image_to_string(preprocess_image(page), config="--psm 4 --oem 3") for page in pages]
-        ocr_text_combined = clean_text(" ".join(processed_text))
-        return ocr_text_combined, pages
-
-    except Exception as e:
-        logging.error(f"Error extracting text from PDF: {e}")
-        return "", None
-
-# Clean extracted text
 def clean_text(text):
     text = re.sub(r"[^\x00-\x7F]+", " ", text)  # Remove non-ASCII characters
     text = text.replace("−", "-")  # Fix OCR misrecognition of hyphen
@@ -178,7 +139,6 @@ def clean_text(text):
     text = re.sub(r"\s*([0-9]+)\s*\.\s*([0-9]+)", r"\1.\2", text)  # Fix decimal formatting
     return text.strip().upper()
 
-# Extract features from text using regex patterns
 def extract_features_from_text(text, rules):
     def parse_feature(pattern):
         match = re.search(pattern, text, re.DOTALL)
@@ -188,19 +148,19 @@ def extract_features_from_text(text, rules):
                 logging.debug(f"Extracted {pattern}: {value}")
                 return value
             except ValueError:
-                logging.warning(f"ValueError for pattern {pattern}, setting value to 0")
-                return 0
-        logging.warning(f"Pattern {pattern} did not match or group(1) was None, setting value to 0")
-        return 0
+                logging.warning(f"ValueError for pattern {pattern}, setting value to null")
+                return None
+        logging.warning(f"Pattern {pattern} did not match or group(1) was None, setting value to null")
+        return None
 
     def parse_categorical_feature(pattern, mapping):
         match = re.search(pattern, text, re.DOTALL)
         if match:
-            value = mapping.get(match.group(1).upper(), 0)
+            value = mapping.get(match.group(1).upper(), None)
             logging.debug(f"Extracted {pattern}: {value}")
             return value
-        logging.warning(f"Pattern {pattern} not found, setting value to 0")
-        return 0
+        logging.warning(f"Pattern {pattern} not found, setting value to null")
+        return None
 
     features = {}
     feature_patterns = {
@@ -230,19 +190,16 @@ def extract_features_from_text(text, rules):
         else:
             features[feature] = parse_feature(pattern)
 
-    # Fill missing features with None if not extracted
     for key in model_features:
         features.setdefault(key, None)
     
     logging.debug(f"Extracted features: {features}")
     return features
 
-# Process text to features
 def preprocess_text_to_features(text):
     features = extract_features_from_text(text, model_features)
     return pd.DataFrame([features]).reindex(columns=model_features), features
 
-# Render PDF as images for preview
 def render_pdf(file_path, max_pages=MAX_PAGES):
     images = []
     with fitz.open(file_path) as pdf:
@@ -293,10 +250,6 @@ def handle_pdf_upload(uploaded_file):
 def handle_image_upload(uploaded_image):
     img = Image.open(uploaded_image)
     img = correct_image_orientation(img)
-
-    if not is_image_clear(img):
-        st.warning("The uploaded image appears to be blurry. Please upload with a clearer image.")
-
     text = extract_text_from_image(img)
     feature_df, extracted_features = preprocess_text_to_features(clean_text(text))
     col1, col2 = st.columns([1, 1])
