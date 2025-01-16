@@ -74,14 +74,11 @@ model_features = [
 ]
 
 def preprocess_image(image):
-    # Convert to grayscale
-    image_cv = np.array(image.convert("L"))
-    # Apply mild denoising
-    denoised = cv2.fastNlMeansDenoising(image_cv, h=30, templateWindowSize=7, searchWindowSize=21)
-    # Apply adaptive thresholding for better text contrast
+    image_cv = np.array(image.convert("L")) # Convert to grayscale
+    denoised = cv2.fastNlMeansDenoising(image_cv, h=30, templateWindowSize=7, searchWindowSize=21) # Apply mild denoising
     thresholded = cv2.adaptiveThreshold(
         denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 10
-    )
+    ) # Adaptive thresholding for better text contrast
     return Image.fromarray(thresholded)
 
 def correct_image_orientation(image):
@@ -111,7 +108,6 @@ def extract_text_from_image(image):
         logging.error(f"Error in extract_text_from_image: {e}")
         return ""
 
-# Extract text from PDF with OCR fallback
 def extract_text_from_pdf(file_path, max_pages=MAX_PAGES):
     with fitz.open(file_path) as pdf_file:
         raw_text = ""
@@ -245,8 +241,7 @@ def handle_image_upload(uploaded_image):
     img = Image.open(uploaded_image)
     img = correct_image_orientation(img)
     text = extract_text_from_image(img)
-    cleaned_text = clean_text(text)
-    feature_df, extracted_features = preprocess_text_to_features(cleaned_text)
+    feature_df, extracted_features = preprocess_text_to_features(clean_text(text))
     col1, col2 = st.columns([1, 1])
 
     with col1:
