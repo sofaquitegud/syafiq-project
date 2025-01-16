@@ -104,17 +104,12 @@ def correct_image_orientation(image):
 def extract_text_from_image(image):
     try:
         preprocessed_image = preprocess_image(image)
-        ocr_text = image_to_string(preprocessed_image, config="--psm 6 --oem 1")
+        ocr_text = image_to_string(preprocessed_image, config="--psm 6 --oem 3")
         logging.debug(f"OCR Text: {ocr_text[:200]}")
         return clean_text(ocr_text)
     except Exception as e:
         logging.error(f"Error in extract_text_from_image: {e}")
         return ""
-
-def is_image_clear(image):
-    image_cv = np.array(image.convert("L"))
-    variance_of_laplacian = cv2.Laplacian(image_cv, cv2.CV_64F).var()
-    return variance_of_laplacian >= 100
 
 # Extract text from PDF with OCR fallback
 def extract_text_from_pdf(file_path, max_pages=MAX_PAGES):
@@ -149,9 +144,9 @@ def extract_features_from_text(text, rules):
                 return value
             except ValueError:
                 logging.warning(f"ValueError for pattern {pattern}, setting value to null")
-                return None
+                return 0
         logging.warning(f"Pattern {pattern} did not match or group(1) was None, setting value to null")
-        return None
+        return 0
 
     def parse_categorical_feature(pattern, mapping):
         match = re.search(pattern, text, re.DOTALL)
@@ -160,7 +155,7 @@ def extract_features_from_text(text, rules):
             logging.debug(f"Extracted {pattern}: {value}")
             return value
         logging.warning(f"Pattern {pattern} not found, setting value to null")
-        return None
+        return 0
 
     features = {}
     feature_patterns = {
@@ -234,7 +229,6 @@ def handle_pdf_upload(uploaded_file):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
         temp_file.write(uploaded_file.getbuffer())
         temp_path = temp_file.name
-
     text, _ = extract_text_from_pdf(temp_path)
     feature_df, extracted_features = preprocess_text_to_features(text)
     col1, col2 = st.columns([1, 1])
@@ -251,11 +245,11 @@ def handle_image_upload(uploaded_image):
     img = Image.open(uploaded_image)
     img = correct_image_orientation(img)
     text = extract_text_from_image(img)
-    feature_df, extracted_features = preprocess_text_to_features(clean_text(text))
+    cleaned_text = clean_text(text)
+    feature_df, extracted_features = preprocess_text_to_features(cleaned_text)
     col1, col2 = st.columns([1, 1])
 
     with col1:
-
         st.subheader("Image Preview")
         st.image(img, use_container_width=True)
     with col2:
