@@ -102,7 +102,7 @@ def extract_text_from_image(image):
     try:
         preprocessed_image = preprocess_image(image)
         ocr_text = image_to_string(preprocessed_image, config="--psm 6 --oem 3")
-        logging.debug(f"OCR Text: {ocr_text[:200]}")
+        logging.debug(f"OCR Text: {ocr_text}")
         return clean_text(ocr_text)
     except Exception as e:
         logging.error(f"Error in extract_text_from_image: {e}")
