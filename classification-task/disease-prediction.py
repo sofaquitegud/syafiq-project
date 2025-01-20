@@ -69,11 +69,11 @@ model_features = [
 ]
 
 def preprocess_image(image):
-    image_cv = np.array(image.convert("L")) # Convert to grayscale
-    denoised = cv2.fastNlMeansDenoising(image_cv, h=30, templateWindowSize=7, searchWindowSize=21) # Apply mild denoising
+    image_cv = np.array(image.convert("L"))
+    denoised = cv2.fastNlMeansDenoising(image_cv, h=30, templateWindowSize=7, searchWindowSize=21)
     thresholded = cv2.adaptiveThreshold(
         denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 10
-    ) # Adaptive thresholding for better text contrast
+    )
     return Image.fromarray(thresholded)
 
 def correct_image_orientation(image):
