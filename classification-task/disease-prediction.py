@@ -14,12 +14,11 @@ import xgboost as xgb
 from xgboost import Booster
 from PIL import Image, ExifTags
 from pytesseract import image_to_string
-from pdf2image import convert_from_path
+from collections import defaultdict
 
 logging.basicConfig(level=logging.DEBUG)
 
-tesseract_path = shutil.which("tesseract")
-pytesseract.pytesseract.tesseract_cmd = tesseract_path
+pytesseract.pytesseract.tesseract_cmd = shutil.which("tesseract")
 
 MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/classification-task/xgboost_model.json"
 LOCAL_MODEL_PATH = os.path.join(os.getcwd(), "C:/Users/TMRND/Desktop/syafiq-project/xgboost_model.json")
@@ -32,15 +31,11 @@ def download_model(url, model_path):
     except Exception as e:
         logging.error(f"Failed to download model: {e}")
 
-# Function to determine whether running on Streamlit Cloud or locally
 def is_st_cloud():
     return os.environ.get("STREAMLIT_SERVER", "") != ""
 
-# Temporary path where the model will be downloaded in the Streamlit Cloud environment
 model_tmp_path = "/tmp/xgboost_model.json" if is_st_cloud() else LOCAL_MODEL_PATH
-logging.debug(f"Model path set to : {model_tmp_path}")
 
-# Download the model from GitHub or load locally if running local
 if is_st_cloud():
     download_model(MODEL_PATH_GITHUB, model_tmp_path)
 
@@ -119,16 +114,9 @@ def extract_text_from_pdf(file_path, max_pages=MAX_PAGES):
                 return clean_text(raw_text), None
 
 def clean_text(text):
-    text = re.sub(r"[^\x00-\x7F]+", " ", text)  # Remove non-ASCII characters
-    text = text.replace("−", "-")  # Fix OCR misrecognition of hyphen
-    text = re.sub(r"\$D2|S\$D2|SD-2|S-D2", "SD2", text)  # Fix SD2 misrecognitions
-    text = re.sub(r"\$D1|S\$D1|SD-1|S-D1", "SD1", text)  # Fix SD1 misrecognitions
-    text = re.sub(r"PNS\s*INDEX[:\s]*O", "PNS INDEX: 0", text)  # Fix common OCR misreading of '0'
-    text = re.sub(r"\s*\.\s*", ".", text)  # Remove unnecessary spaces around periods
-    text = re.sub(r"(\s|^)_(\d)", r"\1-\2", text)  # Replace `_` with `-` if followed by a digit
-    text = re.sub(r"\s{2,}", " ", text)  # Replace multiple spaces with a single space
-    text = re.sub(r"\s*([0-9]+)\s*\.\s*([0-9]+)", r"\1.\2", text)  # Fix decimal formatting
-    return text.strip().upper()
+    text = text.encode("ascii", "ignore").decode()
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    return text.upper()
 
 def extract_features_from_text(text, rules):
     def parse_feature(pattern):
@@ -184,7 +172,6 @@ def extract_features_from_text(text, rules):
     for key in model_features:
         features.setdefault(key, None)
     
-    logging.debug(f"Extracted features: {features}")
     return features
 
 def preprocess_text_to_features(text):
