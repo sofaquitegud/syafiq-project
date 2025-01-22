@@ -9,16 +9,15 @@ import logging
 import os
 import urllib.request
 import shutil
-import pytesseract
+import easyocr
 import xgboost as xgb
 from xgboost import Booster
 from PIL import Image, ExifTags
-from pytesseract import image_to_string
 from collections import defaultdict
 
 logging.basicConfig(level=logging.DEBUG)
 
-pytesseract.pytesseract.tesseract_cmd = shutil.which("tesseract")
+ocr_reader = easyocr.Reader(['en'])
 
 MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/classification-task/xgboost_model.json"
 LOCAL_MODEL_PATH = os.path.join(os.getcwd(), "C:/Users/TMRND/Desktop/syafiq-project/xgboost_model.json")
@@ -96,7 +95,9 @@ def correct_image_orientation(image):
 def extract_text_from_image(image):
     try:
         preprocessed_image = preprocess_image(image)
-        ocr_text = image_to_string(preprocessed_image, config="--psm 6 --oem 3")
+        image_array = np.array(preprocessed_image)
+        ocr_result = ocr_reader.readtext(image_array, detail=0)
+        ocr_text = " ".join(ocr_result)
         logging.debug(f"OCR Text: {ocr_text}")
         return clean_text(ocr_text)
     except Exception as e:
@@ -114,6 +115,8 @@ def extract_text_from_pdf(file_path, max_pages=MAX_PAGES):
                 return clean_text(raw_text), None
 
 def clean_text(text):
+    text = re.sub(r"PNS\s*Index(?![\s:])", "PNS Index:", text)
+    text = text.replace("Oxvgen", "Oxygen")
     text = text.encode("ascii", "ignore").decode()
     text = re.sub(r"\s{2,}", " ", text).strip()
     return text.upper()
@@ -150,7 +153,7 @@ def extract_features_from_text(text, rules):
         "Blood Pressure (diastolic)": r"BLOOD\s*PRESSURE\s*[:\s]*[\d]+\/([\d]+)",
         "Stress Index": r"STRESS\s*INDEX\s*[:\s]*([\d.]+)",
         "Recovery Ability": r"RECOVERY\s*ABILITY\s*\(PNS\s*ZONE\)\s*[:\s]*\b(NORMAL|MEDIUM|LOW)\b",
-        "PNS Index": r"PNS\s*INDEX\s*[:\s]*(-?[\d]+(?:\.\d+)?)",
+        "PNS Index": r"PNS\s*INDEX\s*(?:[:\s]*|)([-\d.]+)",
         "SNS Index": r"SNS\s*INDEX\s*[:\s]*(-?[\d.]+)",
         "RMSSD (ms)": r"RMSSD\s*[:\s]*([\d.]+)",
         "SD1 (ms)": r"SD1|[^\w]SD1[^\w]*[:\s]*([\d.]+)",
@@ -159,13 +162,11 @@ def extract_features_from_text(text, rules):
         "Hemoglobin (g/dl)": r"HEMOGLOBIN\s*[:\s]*([\d.]+)",
         "Hemoglobin A1c (%)": r"HEMOGLOBIN\s*A[1IL]C\s*[:\s]*([\d.]+)",
         "Mean RRi (ms)": r"MEAN\s*RRI\s*[:\s]*([\d.]+)",
-        }
+    }
 
     for feature, pattern in feature_patterns.items():
         if feature == "Recovery Ability":
-            features[feature] = parse_categorical_feature(
-                pattern, {"NORMAL": 0, "MEDIUM": 1, "LOW": 2}
-            )
+            features[feature] = parse_categorical_feature(pattern, {"NORMAL": 0, "MEDIUM": 1, "LOW": 2})
         else:
             features[feature] = parse_feature(pattern)
 
