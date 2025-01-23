@@ -8,7 +8,6 @@ import cv2
 import logging
 import os
 import urllib.request
-import shutil
 import easyocr
 import xgboost as xgb
 from xgboost import Booster
@@ -67,23 +66,15 @@ else:
     st.error("Model file does not exist. Please ensure the model is downloaded correctly.")
 
 
-def preprocess_image(image, isolate_roi=False, roi_coords=None):
+def preprocess_image(image):
     image_cv = np.array(image.convert("L"))  # Convert to grayscale
-
     # Apply denoising
     denoised = cv2.fastNlMeansDenoising(image_cv, h=30, templateWindowSize=7, searchWindowSize=21)
-
     # Apply adaptive thresholding
     thresholded = cv2.adaptiveThreshold(
         denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 10
     )
-
-    if isolate_roi and roi_coords:
-        x, y, w, h = roi_coords
-        thresholded = thresholded[y:y + h, x:x + w]
-
     return Image.fromarray(thresholded)
-
 
 def correct_image_orientation(image):
     try:
@@ -104,18 +95,10 @@ def correct_image_orientation(image):
 
 def extract_text_from_image(image):
     try:
-        # Preprocess the entire image
         preprocessed_image = preprocess_image(image)
-
-        # Run OCR on the entire preprocessed image
         ocr_result = ocr_reader.readtext(np.array(preprocessed_image), detail=0)
-
-        # Debugging OCR result
         logging.debug(f"OCR Results: {ocr_result}")
-
-        # Combine extracted text and clean it
-        extracted_text = " ".join(ocr_result)
-        return clean_text(extracted_text)
+        return clean_text(" ".join(ocr_result))
     except Exception as e:
         logging.error(f"Error extracting text from image: {e}")
         return ""
@@ -128,7 +111,7 @@ def extract_text_from_pdf(file_path, max_pages=MAX_PAGES):
             raw_text += page_text
             if raw_text.strip():
                 logging.info("Text successfully extracted from PDF.")
-                return clean_text(raw_text), None
+                return clean_text(raw_text)
 
 def clean_text(text):
     # Replace known OCR misinterpretations
@@ -136,8 +119,6 @@ def clean_text(text):
     text = re.sub(r"PNS\s*Index\s*Mean", "PNS Index: -1 Mean", text, flags=re.IGNORECASE)
     text = text.replace("Oxvgen", "Oxygen")
     text = text.encode("ascii", "ignore").decode()
-    # Clean up whitespace and newlines
-    text = text.replace("\n", " ").strip()
     text = re.sub(r"\s{2,}", " ", text).strip()
 
     logging.debug(f"Cleaned Text: {text}")
@@ -250,9 +231,7 @@ def handle_pdf_upload(uploaded_file):
 def handle_image_upload(uploaded_image):
     img = Image.open(uploaded_image)
     img = correct_image_orientation(img)
-    # Preprocessed image
     preprocessed_img = preprocess_image(img)
-    # Extract text from the preprocessed image
     text = extract_text_from_image(img)
     feature_df, extracted_features = preprocess_text_to_features(clean_text(text))
 
