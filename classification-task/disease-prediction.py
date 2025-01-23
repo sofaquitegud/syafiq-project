@@ -15,7 +15,7 @@ from PIL import Image, ExifTags
 
 logging.basicConfig(level=logging.DEBUG)
 
-ocr_reader = easyocr.Reader(['en'], gpu=True)
+ocr_reader = easyocr.Reader(['en'])
 
 MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/xgboost_model.json"
 LOCAL_MODEL_PATH = os.path.join(os.getcwd(), "C:/Users/TMRND/Desktop/syafiq-project/xgboost_model.json")
