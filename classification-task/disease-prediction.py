@@ -13,7 +13,6 @@ import easyocr
 import xgboost as xgb
 from xgboost import Booster
 from PIL import Image, ExifTags
-from collections import defaultdict
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -22,6 +21,27 @@ ocr_reader = easyocr.Reader(['en'])
 MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/classification-task/xgboost_model.json"
 LOCAL_MODEL_PATH = os.path.join(os.getcwd(), "C:/Users/TMRND/Desktop/syafiq-project/xgboost_model.json")
 MAX_PAGES = 3
+
+disease_labels = {
+    0: "Anaemia",
+    1: "Arrhythmia",
+    2: "Atherosclerosis",
+    3: "Autonomic Dysfunction",
+    4: "Cardiovascular Disease (CVD)",
+    5: "Chronic Fatigue Syndrome (CFS)",
+    6: "Diabetes",
+    7: "Healthy",
+    8: "Hypertension",
+    9: "Respiratory Disease (COPD or Asthma)",
+    10: "Stress-related Disorders",
+}
+
+model_features = [
+    "Heart Rate (bpm)", "Breathing Rate (brpm)", "Oxygen Saturation (%)", "Blood Pressure (systolic)",
+    "Blood Pressure (diastolic)", "Stress Index", "Recovery Ability", "PNS Index", "SNS Index",
+    "RMSSD (ms)", "SD2 (ms)", "Hemoglobin A1c (%)", "Mean RRi (ms)", "SD1 (ms)", "HRV SDNN (ms)",
+    "Hemoglobin (g/dl)",
+]
 
 def download_model(url, model_path):
     try:
@@ -46,34 +66,24 @@ else:
     logging.error(f"Model file does not exist at {model_tmp_path}")
     st.error("Model file does not exist. Please ensure the model is downloaded correctly.")
 
-disease_labels = {
-    0: "Anaemia",
-    1: "Arrhythmia",
-    2: "Atherosclerosis",
-    3: "Autonomic Dysfunction",
-    4: "Cardiovascular Disease (CVD)",
-    5: "Chronic Fatigue Syndrome (CFS)",
-    6: "Diabetes",
-    7: "Healthy",
-    8: "Hypertension",
-    9: "Respiratory Disease (COPD or Asthma)",
-    10: "Stress-related Disorders",
-}
 
-model_features = [
-    "Heart Rate (bpm)", "Breathing Rate (brpm)", "Oxygen Saturation (%)", "Blood Pressure (systolic)",
-    "Blood Pressure (diastolic)", "Stress Index", "Recovery Ability", "PNS Index", "SNS Index",
-    "RMSSD (ms)", "SD2 (ms)", "Hemoglobin A1c (%)", "Mean RRi (ms)", "SD1 (ms)", "HRV SDNN (ms)",
-    "Hemoglobin (g/dl)",
-]
+def preprocess_image(image, isolate_roi=False, roi_coords=None):
+    image_cv = np.array(image.convert("L"))  # Convert to grayscale
 
-def preprocess_image(image):
-    image_cv = np.array(image.convert("L"))
+    # Apply denoising
     denoised = cv2.fastNlMeansDenoising(image_cv, h=30, templateWindowSize=7, searchWindowSize=21)
+
+    # Apply adaptive thresholding
     thresholded = cv2.adaptiveThreshold(
         denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 10
     )
+
+    if isolate_roi and roi_coords:
+        x, y, w, h = roi_coords
+        thresholded = thresholded[y:y + h, x:x + w]
+
     return Image.fromarray(thresholded)
+
 
 def correct_image_orientation(image):
     try:
@@ -94,14 +104,20 @@ def correct_image_orientation(image):
 
 def extract_text_from_image(image):
     try:
+        # Preprocess the entire image
         preprocessed_image = preprocess_image(image)
-        image_array = np.array(preprocessed_image)
-        ocr_result = ocr_reader.readtext(image_array, detail=0)
-        ocr_text = " ".join(ocr_result)
-        logging.debug(f"OCR Text: {ocr_text}")
-        return clean_text(ocr_text)
+
+        # Run OCR on the entire preprocessed image
+        ocr_result = ocr_reader.readtext(np.array(preprocessed_image), detail=0)
+
+        # Debugging OCR result
+        logging.debug(f"OCR Results: {ocr_result}")
+
+        # Combine extracted text and clean it
+        extracted_text = " ".join(ocr_result)
+        return clean_text(extracted_text)
     except Exception as e:
-        logging.error(f"Error in extract_text_from_image: {e}")
+        logging.error(f"Error extracting text from image: {e}")
         return ""
 
 def extract_text_from_pdf(file_path, max_pages=MAX_PAGES):
@@ -115,15 +131,21 @@ def extract_text_from_pdf(file_path, max_pages=MAX_PAGES):
                 return clean_text(raw_text), None
 
 def clean_text(text):
-    text = re.sub(r"PNS\s*Index(?![\s:])", "PNS Index:", text)
+    # Replace known OCR misinterpretations
+    text = re.sub(r"PNS\s*Index(?![\s:])", "PNS Index:", text, flags=re.IGNORECASE)
+    text = re.sub(r"PNS\s*Index\s*Mean", "PNS Index: -1 Mean", text, flags=re.IGNORECASE)
     text = text.replace("Oxvgen", "Oxygen")
     text = text.encode("ascii", "ignore").decode()
+    # Clean up whitespace and newlines
+    text = text.replace("\n", " ").strip()
     text = re.sub(r"\s{2,}", " ", text).strip()
+
+    logging.debug(f"Cleaned Text: {text}")
     return text.upper()
 
 def extract_features_from_text(text, rules):
     def parse_feature(pattern):
-        match = re.search(pattern, text, re.DOTALL)
+        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
         if match and match.group(1):
             try:
                 value = float(match.group(1).replace(",", "."))
@@ -153,7 +175,7 @@ def extract_features_from_text(text, rules):
         "Blood Pressure (diastolic)": r"BLOOD\s*PRESSURE\s*[:\s]*[\d]+\/([\d]+)",
         "Stress Index": r"STRESS\s*INDEX\s*[:\s]*([\d.]+)",
         "Recovery Ability": r"RECOVERY\s*ABILITY\s*\(PNS\s*ZONE\)\s*[:\s]*\b(NORMAL|MEDIUM|LOW)\b",
-        "PNS Index": r"PNS\s*INDEX\s*(?:[:\s]*|)([-\d.]+)",
+        "PNS Index": r"PNS\s*INDEX\s*[:\s]*(-?\d+(?:\.\d+)?)(?=\s*MEAN|$)",
         "SNS Index": r"SNS\s*INDEX\s*[:\s]*(-?[\d.]+)",
         "RMSSD (ms)": r"RMSSD\s*[:\s]*([\d.]+)",
         "SD1 (ms)": r"SD1|[^\w]SD1[^\w]*[:\s]*([\d.]+)",
@@ -228,13 +250,20 @@ def handle_pdf_upload(uploaded_file):
 def handle_image_upload(uploaded_image):
     img = Image.open(uploaded_image)
     img = correct_image_orientation(img)
+    # Preprocessed image
+    preprocessed_img = preprocess_image(img)
+    # Extract text from the preprocessed image
     text = extract_text_from_image(img)
     feature_df, extracted_features = preprocess_text_to_features(clean_text(text))
-    col1, col2 = st.columns([1, 1])
 
+    col1, col2 = st.columns([1, 1])
+    
     with col1:
         st.subheader("Image Preview")
-        st.image(img, use_container_width=True)
+        st.image(img, caption='Original Image', use_container_width=True)
+        # Display preprocessed image
+        st.image(preprocessed_img, caption='Preprocessed Image', use_container_width=True)
+
     with col2:
         process_extracted_features(feature_df, extracted_features, col2)
 
