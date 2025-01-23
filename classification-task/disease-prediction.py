@@ -15,7 +15,7 @@ from PIL import Image, ExifTags
 
 logging.basicConfig(level=logging.DEBUG)
 
-ocr_reader = easyocr.Reader(['en'])
+ocr_reader = easyocr.Reader(['en'], gpu=True)
 
 MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/classification-task/xgboost_model.json"
 LOCAL_MODEL_PATH = os.path.join(os.getcwd(), "C:/Users/TMRND/Desktop/syafiq-project/xgboost_model.json")
@@ -46,15 +46,21 @@ def download_model(url, model_path):
     try:
         urllib.request.urlretrieve(url, model_path)
         logging.info(f"Model downloaded to {model_path}")
+        # Check if the model file exists after download
+        if os.path.exists(model_path):
+            logging.info("Model file exists after download.")
+        else:
+            logging.error("Model file does not exist after download.")
     except Exception as e:
         logging.error(f"Failed to download model: {e}")
+
 
 def is_st_cloud():
     return os.environ.get("STREAMLIT_SERVER", "") != ""
 
 model_tmp_path = "/tmp/xgboost_model.json" if is_st_cloud() else LOCAL_MODEL_PATH
 
-if is_st_cloud():
+if is_st_cloud() and not os.path.exists(model_tmp_path):
     download_model(MODEL_PATH_GITHUB, model_tmp_path)
 
 xgb_model = Booster()
@@ -114,7 +120,6 @@ def extract_text_from_pdf(file_path, max_pages=MAX_PAGES):
                 return clean_text(raw_text)
 
 def clean_text(text):
-    # Replace known OCR misinterpretations
     text = re.sub(r"PNS\s*Index(?![\s:])", "PNS Index:", text, flags=re.IGNORECASE)
     text = re.sub(r"PNS\s*Index\s*Mean", "PNS Index: -1 Mean", text, flags=re.IGNORECASE)
     text = text.replace("Oxvgen", "Oxygen")
@@ -125,17 +130,17 @@ def clean_text(text):
     return text.upper()
 
 def extract_features_from_text(text, rules):
-    def parse_feature(pattern):
-        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        if match and match.group(1):
-            try:
-                value = float(match.group(1).replace(",", "."))
-                logging.debug(f"Extracted {pattern}: {value}")
-                return value
-            except ValueError:
-                logging.warning(f"ValueError for pattern {pattern}, setting value to null")
-                return 0
-        logging.warning(f"Pattern {pattern} did not match or group(1) was None, setting value to null")
+    def parse_feature(patterns):
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            if match and match.group(1):
+                try:
+                    value = float(match.group(1).replace(",", "."))
+                    logging.debug(f"Extracted {pattern}: {value}")
+                    return value
+                except ValueError:
+                    logging.warning(f"ValueError for pattern {pattern}, skipping this pattern")
+        logging.warning(f"None of the patterns for this feature matched, setting value to null")
         return 0
 
     def parse_categorical_feature(pattern, mapping):
@@ -149,34 +154,34 @@ def extract_features_from_text(text, rules):
 
     features = {}
     feature_patterns = {
-        "Heart Rate (bpm)": r"HEART\s*RATE\s*[:\s]*([\d.]+)",
-        "Breathing Rate (brpm)": r"BREATHING\s*RATE\s*[:\s]*([\d.]+)",
-        "Oxygen Saturation (%)": r"OXYGEN\s*SATURATION\s*[:\s]*([\d.]+)",
-        "Blood Pressure (systolic)": r"BLOOD\s*PRESSURE\s*[:\s]*([\d]+)\/[\d]+",
-        "Blood Pressure (diastolic)": r"BLOOD\s*PRESSURE\s*[:\s]*[\d]+\/([\d]+)",
-        "Stress Index": r"STRESS\s*INDEX\s*[:\s]*([\d.]+)",
-        "Recovery Ability": r"RECOVERY\s*ABILITY\s*\(PNS\s*ZONE\)\s*[:\s]*\b(NORMAL|MEDIUM|LOW)\b",
-        "PNS Index": r"PNS\s*INDEX\s*[:\s]*(-?\d+(?:\.\d+)?)(?=\s*MEAN|$)",
-        "SNS Index": r"SNS\s*INDEX\s*[:\s]*(-?[\d.]+)",
-        "RMSSD (ms)": r"RMSSD\s*[:\s]*([\d.]+)",
-        "SD1 (ms)": r"SD1|[^\w]SD1[^\w]*[:\s]*([\d.]+)",
-        "SD2 (ms)": r"SD2|[^\w]SD2[^\w]*[:\s]*([\d.]+)",
-        "HRV SDNN (ms)": r"HRV\s*SDNN\s*[:\s]*([\d.]+)",
-        "Hemoglobin (g/dl)": r"HEMOGLOBIN\s*[:\s]*([\d.]+)",
-        "Hemoglobin A1c (%)": r"HEMOGLOBIN\s*A[1IL]C\s*[:\s]*([\d.]+)",
-        "Mean RRi (ms)": r"MEAN\s*RRI\s*[:\s]*([\d.]+)",
+        "Heart Rate (bpm)": [r"HEART\s*RATE\s*[:\s]*([\d.]+)"],
+        "Breathing Rate (brpm)": [r"BREATHING\s*RATE\s*[:\s]*([\d.]+)"],
+        "Oxygen Saturation (%)": [r"OXYGEN\s*SATURATION\s*[:\s]*([\d.]+)"],
+        "Blood Pressure (systolic)": [r"BLOOD\s*PRESSURE\s*[:\s]*([\d]+)\/[\d]+"],
+        "Blood Pressure (diastolic)": [r"BLOOD\s*PRESSURE\s*[:\s]*[\d]+\/([\d]+)"],
+        "Stress Index": [r"STRESS\s*INDEX\s*[:\s]*([\d.]+)"],
+        "Recovery Ability": [r"RECOVERY\s*ABILITY\s*\(PNS\s*ZONE\)\s*[:\s]*\b(NORMAL|MEDIUM|LOW)\b"],
+        "PNS Index": [r"PNS\s*INDEX\s*[:\s]*(-?\d+(?:\.\d+)?)(?=\s*MEAN|$)"],
+        "SNS Index": [r"SNS\s*INDEX\s*[:\s]*(-?[\d.]+)"],
+        "RMSSD (ms)": [r"RMSSD\s*[:\s]*([\d.]+)", r"RMSSD[^\w]*[:\s]*([\d.]+)"],
+        "SD1 (ms)": [r"SD1\s*[:\s]*([\d.]+)", r"SD1[^\w]*[:\s]*([\d.]+)"],
+        "SD2 (ms)": [r"SD2\s*[:\s]*([\d.]+)", r"SD2[^\w]*[:\s]*([\d.]+)"],
+        "HRV SDNN (ms)": [r"HRV\s*SDNN\s*[:\s]*([\d.]+)"],
+        "Hemoglobin (g/dl)": [r"HEMOGLOBIN\s*[:\s]*([\d.]+)"],
+        "Hemoglobin A1c (%)": [r"HEMOGLOBIN\s*A[1IL]C\s*[:\s]*([\d.]+)"],
+        "Mean RRi (ms)": [r"MEAN\s*RRI\s*[:\s]*([\d.]+)", r"MEAN\s*RRi\s*[:\s]*([\d.]+)"], 
     }
 
-    for feature, pattern in feature_patterns.items():
+    for feature, patterns in feature_patterns.items():
         if feature == "Recovery Ability":
-            features[feature] = parse_categorical_feature(pattern, {"NORMAL": 0, "MEDIUM": 1, "LOW": 2})
+            features[feature] = parse_categorical_feature(patterns[0], {"NORMAL": 0, "MEDIUM": 1, "LOW": 2})
         else:
-            features[feature] = parse_feature(pattern)
+            features[feature] = parse_feature(patterns)
 
     for key in model_features:
         features.setdefault(key, None)
     
-    return features
+    return features   
 
 def preprocess_text_to_features(text):
     features = extract_features_from_text(text, model_features)
@@ -240,7 +245,6 @@ def handle_image_upload(uploaded_image):
     with col1:
         st.subheader("Image Preview")
         st.image(img, caption='Original Image', use_container_width=True)
-        # Display preprocessed image
         st.image(preprocessed_img, caption='Preprocessed Image', use_container_width=True)
 
     with col2:
