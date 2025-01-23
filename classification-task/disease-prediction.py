@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 ocr_reader = easyocr.Reader(['en'], gpu=True)
 
-MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/classification-task/xgboost_model.json"
+MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/xgboost_model.json"
 LOCAL_MODEL_PATH = os.path.join(os.getcwd(), "C:/Users/TMRND/Desktop/syafiq-project/xgboost_model.json")
 MAX_PAGES = 3
 
@@ -46,7 +46,6 @@ def download_model(url, model_path):
     try:
         urllib.request.urlretrieve(url, model_path)
         logging.info(f"Model downloaded to {model_path}")
-        # Check if the model file exists after download
         if os.path.exists(model_path):
             logging.info("Model file exists after download.")
         else:
