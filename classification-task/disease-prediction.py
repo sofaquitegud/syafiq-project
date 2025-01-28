@@ -220,7 +220,7 @@ def handle_pdf_upload(uploaded_file):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
         temp_file.write(uploaded_file.getbuffer())
         temp_path = temp_file.name
-    text, _ = extract_text_from_pdf(temp_path)
+    text = extract_text_from_pdf(temp_path)
     feature_df, extracted_features = preprocess_text_to_features(text)
     col1, col2 = st.columns([1, 1])
 
