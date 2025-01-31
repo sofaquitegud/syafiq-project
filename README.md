@@ -53,7 +53,7 @@ numpy
 pandas
 streamlit
 xgboost
-opencv-python
+opencv-python-headless
 Pillow
 ```
 To install them, run:
@@ -72,7 +72,7 @@ pip install -r requirements.txt
 ---
 
 ## 🏆 Contributors
-- **Your Name** – AI Developer Intern at TM Research & Development
+- **Muhammad Syafiq Farhan Bin Mohd Faridz** – AI Developer Intern at TM Research & Development
 
 ---
 
