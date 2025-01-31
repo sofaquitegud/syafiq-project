@@ -72,8 +72,7 @@ pip install -r requirements.txt
 ---
 
 ## 🏆 Contributors
-- **Your Name** – AI Developer at TM Research & Development
-- **Muhammad Asyraf Bin Anahar** – Collaborator
+- **Your Name** – AI Developer Intern at TM Research & Development
 
 ---
 
@@ -83,7 +82,7 @@ This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) f
 ---
 
 ## 🌟 Acknowledgments
-- **EasyOCR** for text recognition
+- **EasyOCR** for image-to-text recognition
 - **XGBoost** for machine learning
 - **Streamlit** for UI development
 
