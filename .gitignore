@@ -1,1 +1,3 @@
-classification-task/model/saved_data/
+classification-task/model/
+.devcontainer/
+__pycache__/
