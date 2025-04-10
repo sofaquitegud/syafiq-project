@@ -19,7 +19,7 @@ ocr_reader = easyocr.Reader(["en"])
 
 # Model paths
 MODEL_PATH_GITHUB = "https://raw.githubusercontent.com/sofaquitegud/syafiq-project/refs/heads/main/xgboost_model.json"
-LOCAL_MODEL_PATH = Path(__file__).resolve().parent / "xgboost_model.json"
+LOCAL_MODEL_PATH = "./xgboost_model.json"
 MAX_PAGES = 3
 
 disease_labels = {
