@@ -1,8 +1,11 @@
+import os
+
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import numpy as np
 import pandas as pd
 import fitz
 import re
-import os
 import urllib.request
 import easyocr
 import xgboost as xgb
